@@ -22,6 +22,13 @@
       "when": 1793341631379,
       "tag": "0002_fast_longshot",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1793343915079,
+      "tag": "0003_gigantic_vivisector",
+      "breakpoints": true
     }
   ]
 }

@@ -8,6 +8,11 @@ export function getAuth() {
   const baseURL = import.meta.env.BETTER_AUTH_URL || import.meta.env.PUBLIC_APP_URL;
   if (!secret) throw new Error('BETTER_AUTH_SECRET is not configured.');
   if (!baseURL) throw new Error('BETTER_AUTH_URL or PUBLIC_APP_URL is not configured.');
+  const trustedOrigins = [...new Set([
+    baseURL,
+    import.meta.env.PUBLIC_APP_URL,
+    'http://localhost:4321'
+  ].filter(Boolean))];
 
   const socialProviders = {
     ...(import.meta.env.GITHUB_CLIENT_ID && import.meta.env.GITHUB_CLIENT_SECRET
@@ -22,7 +27,7 @@ export function getAuth() {
     database: drizzleAdapter(getDatabase(), { provider: 'pg', schema: dbSchema, camelCase: true }),
     baseURL,
     secret,
-    trustedOrigins: [baseURL],
+    trustedOrigins,
     emailAndPassword: { enabled: true },
     ...(Object.keys(socialProviders).length > 0 ? { socialProviders } : {})
   });

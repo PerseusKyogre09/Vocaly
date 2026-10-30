@@ -127,3 +127,59 @@ src/
 ## Team
 
 Team ZenithCode · VoxFlow
+## Outbound phone calling (Exotel + ElevenLabs)
+
+Outbound calling uses the standalone `phone-bridge/` Node service because Vercel/Astro serverless
+functions do not provide a persistent WebSocket process. The web app creates an authenticated,
+user-scoped call record, asks Exotel to call the destination, and gives Exotel a signed WSS bridge
+URL. The bridge translates Exotel bidirectional raw PCM events into ElevenLabs
+`user_audio_chunk` messages and converts ElevenLabs audio events back into Exotel media events.
+
+### Deploy the bridge
+
+Deploy `phone-bridge/` to a WebSocket-capable service such as Railway, Render, Fly.io, or a
+long-running container/VM. It must have a public `wss://` URL. Configure:
+
+```env
+PORT=8080
+VOXFLOW_APP_URL=https://your-voxflow-app.example
+PHONE_BRIDGE_SECRET=<same random secret configured in the web app>
+ELEVENLABS_AUDIO_SAMPLE_RATE=16000
+```
+
+Set the web app's `PHONE_BRIDGE_PUBLIC_URL` to the bridge's public `wss://` origin and configure
+the Exotel credentials in the root `.env` or deployment environment. `EXOTEL_CALLER_ID` must be
+an ExoPhone that Exotel has enabled for outbound Connect Voice AI calls; a trial number is not
+assumed to be eligible.
+
+The bridge exposes `/` as a health check, `/sessions` for authenticated internal provisioning,
+and `/ws` for Exotel. The authenticated VoxFlow server provisions each user's existing
+ElevenLabs key into bridge memory for one short-lived call session. The key is never placed in
+the Exotel URL, logs, or `phoneCall` records, and is discarded when the session is consumed or
+expires. Never expose the bridge secret or user key to the browser beyond the existing
+authenticated call request.
+
+For Exotel, set `EXOTEL_API_HOST` to the host matching the account region:
+
+```env
+# Mumbai: https://api.in.exotel.com/v1
+# Singapore: https://api.exotel.com/v1
+EXOTEL_API_HOST=https://api.exotel.com/v1
+```
+
+The call request uses `POST {EXOTEL_API_HOST}/Accounts/{AccountSid}/Calls/connect`, HTTP Basic
+authentication with `EXOTEL_API_KEY` as the username and `EXOTEL_API_TOKEN` as the password, and
+`application/x-www-form-urlencoded` fields `From`, `CallerId`, `StreamUrl`, and
+`StreamType=bidirectional`. It also sends `StatusCallback` and
+`StatusCallbackEvents=terminal,answered`; the application callback must be publicly reachable by
+Exotel, so localhost requires a secure tunnel or deployed web app URL.
+
+### Exotel setup
+
+1. In the Exotel dashboard, obtain the Account SID, API key, and API token.
+2. Confirm that AgentStream/Voicebot and outbound Connect Voice AI are enabled for the account.
+3. Use the ExoPhone provisioned for outbound calling as `EXOTEL_CALLER_ID`.
+4. Configure the web app's `PHONE_BRIDGE_PUBLIC_URL` as the bridge's `wss://` URL.
+5. Test the ExoPhone with one call. Trial account restrictions, destination verification, caller-ID
+   approval, and insufficient credits are provider-side checks; VoxFlow surfaces Exotel's returned
+   error and does not substitute a different number.

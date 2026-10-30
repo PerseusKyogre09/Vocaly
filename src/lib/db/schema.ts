@@ -97,4 +97,22 @@ export const testRun = pgTable('testRun', {
   createdAt: timestamp('createdAt', { withTimezone: true }).notNull()
 });
 
-export const dbSchema = { user, session, account, verification, workspace, agentRecord, agent, testRun };
+export const phoneCall = pgTable('phoneCall', {
+  id: text('id').primaryKey(),
+  userId: text('userId').notNull().references(() => user.id, { onDelete: 'cascade' }),
+  agentId: text('agentId').notNull().references(() => agent.id, { onDelete: 'cascade' }),
+  exotelCallSid: text('exotelCallSid').unique(),
+  destination: text('destination').notNull(),
+  status: text('status').notNull().default('initiating'),
+  providerMetadata: jsonb('providerMetadata').notNull().default({}),
+  createdAt: timestamp('createdAt', { withTimezone: true }).notNull(),
+  updatedAt: timestamp('updatedAt', { withTimezone: true }).notNull(),
+  startedAt: timestamp('startedAt', { withTimezone: true }),
+  completedAt: timestamp('completedAt', { withTimezone: true })
+}, (table) => ({
+  userIdIdx: index('phone_call_user_id_idx').on(table.userId),
+  agentIdIdx: index('phone_call_agent_id_idx').on(table.agentId),
+  statusIdx: index('phone_call_status_idx').on(table.status)
+}));
+
+export const dbSchema = { user, session, account, verification, workspace, agentRecord, agent, testRun, phoneCall };

@@ -8,6 +8,15 @@
   let error = '';
   let busy = false;
 
+  async function readAuthResponse(response: Response) {
+    const text = await response.text();
+    try {
+      return text ? JSON.parse(text) : null;
+    } catch {
+      throw new Error(`Authentication server returned a non-JSON response (${response.status}). Reload the page and try again.`);
+    }
+  }
+
   async function submit() {
     busy = true;
     error = '';
@@ -15,7 +24,7 @@
       const endpoint = mode === 'sign-in' ? '/api/auth/sign-in/email' : '/api/auth/sign-up/email';
       const body = mode === 'sign-in' ? { email, password } : { name, email, password };
       const response = await fetch(endpoint, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
-      const data = await response.json().catch(() => null);
+      const data = await readAuthResponse(response);
       if (!response.ok) throw new Error(data?.message || data?.error || 'Authentication failed.');
       window.location.assign('/app');
     } catch (cause) {
@@ -32,7 +41,7 @@
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ provider, callbackURL: '/app' })
     });
-    const data = await response.json().catch(() => null);
+    const data = await readAuthResponse(response);
     if (!response.ok || !data?.url) {
       error = data?.message || data?.error || `${provider} sign-in is not configured.`;
       return;

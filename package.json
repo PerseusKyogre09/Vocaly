@@ -8,7 +8,9 @@
     "preview": "astro preview --host 0.0.0.0",
     "check": "astro check",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate"
+    "db:migrate": "drizzle-kit migrate",
+    "test": "npm run test:bridge",
+    "test:bridge": "npm --prefix phone-bridge test"
   },
   "dependencies": {
     "@astrojs/svelte": "^9.1.2",
@@ -21,11 +23,13 @@
     "better-auth": "^1.7.14",
     "drizzle-orm": "^0.45.4",
     "lucide-svelte": "^0.468.0",
-    "svelte": "^5.38.0"
+    "svelte": "^5.38.0",
+    "ws": "^8.22.0"
   },
   "devDependencies": {
     "@astrojs/check": "^0.9.4",
     "@types/node": "^24.10.0",
+    "@types/ws": "^8.18.2",
     "drizzle-kit": "^0.31.11",
     "typescript": "^5.9.2"
   },
