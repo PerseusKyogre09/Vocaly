@@ -1,0 +1,1 @@
+export async function postJSON<T>(url:string,body:unknown):Promise<T>{const r=await fetch(url,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});const data=await r.json().catch(()=>({error:'Unexpected server response'}));if(!r.ok)throw new Error(data.error||`Request failed (${r.status})`);return data as T;}

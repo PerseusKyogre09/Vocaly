@@ -1,0 +1,51 @@
+# Dependencies
+node_modules/
+
+# Astro, Vite, and deployment output
+dist/
+.astro/
+.vercel/
+.vite/
+
+# Local environment files and secrets
+.env
+.env.*
+!.env.example
+!.env.template
+
+# Test and coverage output
+coverage/
+.nyc_output/
+test-results/
+playwright-report/
+
+# Logs and local runtime files
+*.log
+*.pid
+*.pid.lock
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Local databases and generated caches
+*.db
+*.db-journal
+.cache/
+.eslintcache
+.tsbuildinfo
+
+# Editors and operating-system files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+
+# Certificates and private keys
+*.pem
+*.key
+*.crt

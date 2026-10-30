@@ -1,0 +1,9 @@
+const DB='voxflow-vault'; const STORE='secrets'; const KEY='elevenlabs-key';
+function openDb():Promise<IDBDatabase>{return new Promise((resolve,reject)=>{const r=indexedDB.open(DB,1);r.onupgradeneeded=()=>r.result.createObjectStore(STORE);r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});}
+async function getItem(k:string){const db=await openDb();return new Promise<any>((resolve,reject)=>{const r=db.transaction(STORE,'readonly').objectStore(STORE).get(k);r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});}
+async function putItem(k:string,v:any){const db=await openDb();return new Promise<void>((resolve,reject)=>{const r=db.transaction(STORE,'readwrite').objectStore(STORE).put(v,k);r.onsuccess=()=>resolve();r.onerror=()=>reject(r.error);});}
+async function getCryptoKey():Promise<CryptoKey>{let key=await getItem('crypto-key');if(!key){key=await crypto.subtle.generateKey({name:'AES-GCM',length:256},false,['encrypt','decrypt']);await putItem('crypto-key',key);}return key;}
+export async function saveElevenLabsKey(secret:string){const key=await getCryptoKey();const iv=crypto.getRandomValues(new Uint8Array(12));const encrypted=await crypto.subtle.encrypt({name:'AES-GCM',iv},key,new TextEncoder().encode(secret));await putItem(KEY,{iv:[...iv],data:[...new Uint8Array(encrypted)]});}
+export async function readElevenLabsKey():Promise<string|null>{const item=await getItem(KEY);if(!item)return null;const key=await getCryptoKey();const plain=await crypto.subtle.decrypt({name:'AES-GCM',iv:new Uint8Array(item.iv)},key,new Uint8Array(item.data));return new TextDecoder().decode(plain);}
+export async function deleteElevenLabsKey(){const db=await openDb();await new Promise<void>((resolve,reject)=>{const tx=db.transaction(STORE,'readwrite');tx.objectStore(STORE).delete(KEY);tx.oncomplete=()=>resolve();tx.onerror=()=>reject(tx.error);});}
+export async function hasElevenLabsKey(){return !!(await getItem(KEY));}

@@ -1,0 +1,20 @@
+---
+const { title = 'VoxFlow — Voice agents, built by anyone' } = Astro.props;
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#090b13" />
+    <meta name="description" content="Build, test and deploy reliable voice AI agents without code." />
+    <title>{title}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  </head>
+  <body><slot /></body>
+</html>
+<style is:global>
+:root{font-family:Manrope,system-ui,sans-serif;color:#eef0fa;background:#0b0b0d;font-synthesis:none;text-rendering:optimizeLegibility}*{box-sizing:border-box}body{margin:0;min-width:320px;background:#0b0b0d}button,input,textarea,select{font:inherit}button{cursor:pointer}a{color:inherit;text-decoration:none}::selection{background:#a687ff;color:#0b0b0d}.mono{font-family:'DM Mono',monospace}
+</style>

@@ -1,0 +1,27 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1793340572954,
+      "tag": "0000_auth_and_workspace",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1793341325367,
+      "tag": "0001_cuddly_brood",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1793341631379,
+      "tag": "0002_fast_longshot",
+      "breakpoints": true
+    }
+  ]
+}

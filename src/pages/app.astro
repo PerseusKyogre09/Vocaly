@@ -1,0 +1,9 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import App from '../components/App.svelte';
+import { getSession } from '../lib/session';
+
+const session = await getSession(Astro.request);
+if (!session?.user) return Astro.redirect('/auth');
+---
+<BaseLayout><App client:only="svelte" /></BaseLayout>
