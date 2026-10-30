@@ -29,18 +29,41 @@ export function getAgentWorkflow(record) {
       else if (/collect/i.test(label)) kind = 'collect';
       else if (/ask|question/i.test(label)) kind = 'ask';
       else if (/condition|if \/ else/i.test(label)) kind = 'condition';
-      else if (/handoff|human/i.test(label)) kind = 'handoff';
-      else if (/end|complete|fallback/i.test(label)) kind = /fallback/i.test(label) ? 'fallback' : 'end';
+      else if (/human handoff|handoff/i.test(label)) kind = 'handoff';
+      else if (/fallback/i.test(label)) kind = 'fallback';
+      else if (/confirm/i.test(label)) kind = 'confirm';
+      else if (/successful completion|complete conversation|end conversation/i.test(label)) kind = 'success';
       else if (/action|calendar|crm|integration/i.test(label)) kind = 'action';
       else kind = 'inform';
     }
-    const cfg = data.config || { name: label || node.id, instructions: data.description || '' };
+    const description = norm(data.description);
+    let cfg = data.config;
+    if (!cfg) {
+      cfg = { name: label || node.id };
+      if (kind === 'collect') {
+        const fieldsText = description.replace(/^(ask|collect)\s*[·:–-]\s*/i, '');
+        const fields = fieldsText.split(/,|\band\b/i).map(name => name.trim()).filter(Boolean);
+        cfg.fields = fields.map(name => ({ name, type: 'text', required: true }));
+      } else if (kind === 'ask') cfg.question = description.replace(/^ask\s*[·:–-]\s*/i, '') || label;
+      else if (kind === 'confirm') cfg.details = description.replace(/^(respond|confirm)\s*[·:–-]\s*/i, '') || label;
+      else if (kind === 'handoff') Object.assign(cfg, { instructions: description || label, fallback: 'If a human is unavailable, collect callback details and explain the follow-up.' });
+      else if (kind === 'action') cfg.instructions = description || label;
+      else if (['end','success','fallback'].includes(kind)) cfg.message = description || label;
+      else cfg.instructions = description;
+    }
     return { ...node, type: 'workflow', data: { ...data, kind, config: cfg } };
+  }) : [];
+  const kindsById = new Map(nodes.map(node => [node.id, node.data.kind]));
+  const edges = Array.isArray(workflow.edges) ? structuredClone(workflow.edges).map(edge => {
+    if (kindsById.get(edge.source) !== 'action' || edge.sourceHandle) return edge;
+    const label = norm(edge.label).toLowerCase();
+    const sourceHandle = /fail|unavailable|error|no/i.test(label) ? 'failure' : 'success';
+    return { ...edge, sourceHandle };
   }) : [];
   return {
     version: Number.isInteger(workflow.version) && workflow.version >= 0 ? workflow.version : 0,
     nodes,
-    edges: Array.isArray(workflow.edges) ? structuredClone(workflow.edges) : []
+    edges
   };
 }
 
@@ -50,8 +73,9 @@ const isTrigger = (n) => n.type?.startsWith('trigger_');
 const isEnding = (n) => ['end', 'success', 'fallback'].includes(n.type);
 
 export function validateWorkflow(workflow) {
-  const nodes = Array.isArray(workflow?.nodes) ? workflow.nodes.map(n => ({ ...n, type: n.data?.kind || n.type })) : [];
-  const edges = Array.isArray(workflow?.edges) ? workflow.edges : [];
+  const normalized = getAgentWorkflow({ workflow });
+  const nodes = normalized.nodes.map(n => ({ ...n, type: n.data?.kind || n.type }));
+  const edges = normalized.edges;
   const issues = [];
   const byId = new Map(nodes.map(n => [n.id, n]));
   const issue = (severity, code, message, nodeId) => issues.push({ severity, code, message, nodeId: nodeId || null });
@@ -115,8 +139,9 @@ export function validateWorkflow(workflow) {
 export function compileWorkflow(workflow) {
   const issues = validateWorkflow(workflow);
   if (issues.some(i => i.severity === 'error')) return { ok: false, issues, instructions: '' };
-  const nodes = workflow.nodes.map(n => ({ ...n, type: n.data?.kind || n.type }));
-  const edges = workflow.edges;
+  const normalized = getAgentWorkflow({ workflow });
+  const nodes = normalized.nodes.map(n => ({ ...n, type: n.data?.kind || n.type }));
+  const edges = normalized.edges;
   const byId = new Map(nodes.map(n => [n.id,n]));
   const outgoing = id => edges.filter(e => e.source === id);
   const visited = new Set();

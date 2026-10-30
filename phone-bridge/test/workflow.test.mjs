@@ -95,3 +95,21 @@ test('normalizes legacy default nodes into the styled editor without hiding thei
   assert.equal(loaded.nodes[0].data.kind,'trigger_started');
   assert.equal(loaded.nodes[0].data.config.instructions,'Start here');
 });
+
+test('legacy calendar demo labels no longer become false ending nodes',()=>{
+  const migrated=getAgentWorkflow({workflow:{nodes:[
+    {id:'t',type:'default',data:{label:'Incoming call',description:'Trigger · Start conversation'}},
+    {id:'c',type:'default',data:{label:'Collect details',description:'Ask · Name, date, appointment type'}},
+    {id:'a',type:'default',data:{label:'Check calendar',description:'Action · Mock availability lookup'}},
+    {id:'r',type:'default',data:{label:'Confirm booking',description:'Respond · Read back the slot'}},
+    {id:'h',type:'default',data:{label:'Human handoff',description:'Fallback · Route to clinic staff'}}
+  ],edges:[
+    {id:'1',source:'t',target:'c'},{id:'2',source:'c',target:'a'},{id:'3',source:'a',target:'r'},{id:'4',source:'a',target:'h',label:'If unavailable'}
+  ]}});
+  assert.equal(migrated.nodes.find(n=>n.id==='a').data.kind,'action');
+  assert.equal(migrated.nodes.find(n=>n.id==='r').data.kind,'confirm');
+  assert.deepEqual(migrated.nodes.find(n=>n.id==='c').data.config.fields.map(f=>f.name),['Name','date','appointment type']);
+  assert.equal(migrated.edges.find(e=>e.id==='3').sourceHandle,'success');
+  assert.equal(migrated.edges.find(e=>e.id==='4').sourceHandle,'failure');
+  assert.ok(validateWorkflow(migrated).some(i=>i.code==='missing_ending'));
+});
