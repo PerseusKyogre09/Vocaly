@@ -7,18 +7,20 @@ import {
   actionInstance,
   actionSchema,
   agent,
+  callSummary,
   conversationExtraction,
   conversationRecord
 } from '../../../lib/db/schema';
 import { getSession } from '../../../lib/session';
-import { extractConversationData, DEFAULT_APPOINTMENT_SCHEMA_FIELDS, type FieldDefinition } from '../../../lib/conversation-extractor';
+import { extractConversationData, DEFAULT_APPOINTMENT_SCHEMA_FIELDS, type FieldDefinition, type ExtractionResponse } from '../../../lib/conversation-extractor';
+import { generateCallSummary } from '../../../lib/call-summarizer';
 import { resolveTemplate, redactSecrets } from '../../../lib/action-engine';
 
 export const prerender = false;
 
 /**
  * GET /api/actions/conversations
- * Lists past conversations with their extraction summaries and action counts.
+ * Lists past conversations with their extraction summaries, call intelligence summaries, and action counts.
  */
 export const GET: APIRoute = async ({ request, url }) => {
   const session = await getSession(request);
@@ -38,13 +40,27 @@ export const GET: APIRoute = async ({ request, url }) => {
     return Response.json({ conversations: [] });
   }
 
-  const extractions = await db.select().from(conversationExtraction)
-    .where(and(eq(conversationExtraction.userId, session.user.id), inArray(conversationExtraction.conversationId, convIds)));
-
-  const instances = await db.select().from(actionInstance)
-    .where(and(eq(actionInstance.userId, session.user.id), inArray(actionInstance.conversationId, convIds)));
+  const [extractions, summaries, instances] = await Promise.all([
+    db.select().from(conversationExtraction)
+      .where(and(eq(conversationExtraction.userId, session.user.id), inArray(conversationExtraction.conversationId, convIds))),
+    db.select({
+      id: callSummary.id,
+      conversationId: callSummary.conversationId,
+      title: callSummary.title,
+      executiveSummary: callSummary.executiveSummary,
+      customerIntent: callSummary.customerIntent,
+      callOutcome: callSummary.callOutcome,
+      followUpTasks: callSummary.followUpTasks,
+      status: callSummary.status,
+      createdAt: callSummary.createdAt
+    }).from(callSummary)
+      .where(and(eq(callSummary.userId, session.user.id), inArray(callSummary.conversationId, convIds))),
+    db.select().from(actionInstance)
+      .where(and(eq(actionInstance.userId, session.user.id), inArray(actionInstance.conversationId, convIds)))
+  ]);
 
   const extractionMap = new Map(extractions.map(e => [e.conversationId, e]));
+  const summaryMap = new Map(summaries.map(s => [s.conversationId, s]));
   const instancesMap = new Map<string, typeof instances>();
   for (const inst of instances) {
     const list = instancesMap.get(inst.conversationId) || [];
@@ -55,11 +71,13 @@ export const GET: APIRoute = async ({ request, url }) => {
   const enriched = conversations.map(c => ({
     ...c,
     extraction: extractionMap.get(c.id) || null,
+    callSummary: summaryMap.get(c.id) || null,
     actions: instancesMap.get(c.id) || []
   }));
 
   return Response.json({ conversations: enriched });
 };
+
 
 /**
  * POST /api/actions/process-conversation
@@ -141,36 +159,84 @@ export const POST: APIRoute = async ({ request }) => {
     updatedAt: now
   });
 
-  // Perform Groq extraction
-  let extractionResult;
-  try {
-    const model = typeof body.model === 'string' ? body.model : undefined;
-    extractionResult = await extractConversationData(transcriptText, schemaFields, model);
-  } catch (error) {
+  const selectedModel = typeof body.model === 'string' && body.model ? body.model : undefined;
+
+  // --- CONCURRENT PROCESSING: Summarization + Extraction run in parallel ---
+  // They are independent: one failure does NOT discard the other.
+  const [extractionOutcome, summaryOutcome] = await Promise.allSettled([
+    extractConversationData(transcriptText, schemaFields, selectedModel),
+    generateCallSummary(transcriptText, selectedModel)
+  ]);
+
+  // --- Persist extraction independently ---
+  let extractionResult: ExtractionResponse | null = null;
+  let extractionId: string | null = null;
+
+  if (extractionOutcome.status === 'fulfilled') {
+    extractionResult = extractionOutcome.value;
+    extractionId = crypto.randomUUID();
+    await db.insert(conversationExtraction).values({
+      id: extractionId,
+      userId: session.user.id,
+      conversationId,
+      schemaId,
+      extractedFields: extractionResult.fields,
+      summary: extractionResult.summary,
+      intent: extractionResult.intent,
+      uncertainties: extractionResult.uncertainties,
+      groqModel: extractionResult.groqModel,
+      rawModelOutput: extractionResult.rawModelOutput,
+      status: 'completed',
+      createdAt: new Date()
+    });
+  } else {
+    // Extraction failed — mark conversation failed but still attempt summary persistence below
+    console.error('[conversations] Extraction failed:', extractionOutcome.reason);
+  }
+
+  // --- Persist call summary independently ---
+  let savedSummary: any = null;
+  if (summaryOutcome.status === 'fulfilled') {
+    const sr = summaryOutcome.value;
+    const summaryId = crypto.randomUUID();
+    const ts = new Date();
+    const summaryRecord = {
+      id: summaryId,
+      userId: session.user.id,
+      conversationId,
+      agentId: agentId || null,
+      title: sr.title,
+      executiveSummary: sr.executiveSummary,
+      customerIntent: sr.customerIntent,
+      keyDiscussionPoints: sr.keyDiscussionPoints as any,
+      customerRequirements: sr.customerRequirements as any,
+      callOutcome: sr.callOutcome,
+      importantCommitments: sr.importantCommitments as any,
+      followUpTasks: sr.followUpTasks as any,
+      unresolvedIssues: sr.unresolvedIssues as any,
+      extractedEntities: sr.extractedEntities as any,
+      groqModel: sr.groqModel,
+      rawModelOutput: sr.rawModelOutput,
+      status: 'completed' as const,
+      createdAt: ts,
+      updatedAt: ts
+    };
+    await db.insert(callSummary).values(summaryRecord);
+    savedSummary = summaryRecord;
+  } else {
+    console.error('[conversations] Summarization failed:', summaryOutcome.reason);
+  }
+
+  // If extraction entirely failed, return early
+  if (!extractionResult) {
     await db.update(conversationRecord).set({ status: 'failed', updatedAt: new Date() })
       .where(eq(conversationRecord.id, conversationId));
     return Response.json({
-      error: error instanceof Error ? error.message : 'Extraction failed.',
-      conversationId
+      error: 'Structured extraction failed.',
+      conversationId,
+      summary: savedSummary
     }, { status: 502 });
   }
-
-  // Persist extraction
-  const extractionId = crypto.randomUUID();
-  await db.insert(conversationExtraction).values({
-    id: extractionId,
-    userId: session.user.id,
-    conversationId,
-    schemaId,
-    extractedFields: extractionResult.fields,
-    summary: extractionResult.summary,
-    intent: extractionResult.intent,
-    uncertainties: extractionResult.uncertainties,
-    groqModel: extractionResult.groqModel,
-    rawModelOutput: extractionResult.rawModelOutput,
-    status: 'completed',
-    createdAt: new Date()
-  });
 
   // Prepare variable dictionary for template resolution
   const variables: Record<string, unknown> = {
@@ -283,9 +349,18 @@ export const POST: APIRoute = async ({ request }) => {
       fields: extractionResult.fields,
       uncertainties: extractionResult.uncertainties
     },
+    summary: savedSummary ? {
+      id: savedSummary.id,
+      title: savedSummary.title,
+      executiveSummary: savedSummary.executiveSummary,
+      customerIntent: savedSummary.customerIntent,
+      callOutcome: savedSummary.callOutcome,
+      followUpTasks: savedSummary.followUpTasks
+    } : null,
     actions: createdInstances.map(inst => ({
       ...inst,
       payload: redactSecrets(inst.payload)
     }))
   }, { status: 201 });
 };
+

@@ -25,14 +25,15 @@
     Sliders,
     Layers,
     Terminal,
-    Copy
+    Copy,
+    Download
   } from 'lucide-svelte';
 
   export let agents: any[] = [];
   export let primaryModel: string = 'openai/gpt-oss-120b';
 
   // State
-  let activeTab: 'overview' | 'inbox' | 'definitions' | 'schemas' | 'history' | 'demo' = 'overview';
+  let activeTab: 'overview' | 'inbox' | 'definitions' | 'schemas' | 'history' | 'intelligence' | 'demo' = 'overview';
   let loading = false;
   let error = '';
   let toast = '';
@@ -68,6 +69,13 @@
   let historyFilterStatus = 'all';
   let selectedHistoryLog: any = null;
 
+  // Call Intelligence
+  let conversations: any[] = [];
+  let selectedConversation: any = null;
+  let intelligenceLoading = false;
+  let summarizingConvId: string | null = null;
+  let intelligenceSearch = '';
+
   // Demonstration Experience
   let demoTranscript = `Agent: Thank you for calling Sunrise Clinic. How can I help you today?
 Caller: Hi there! My name is Arthur Dent, and I'd like to book an appointment with Dr. Higgins for a routine dental checkup next Tuesday at 2:30 PM.
@@ -98,7 +106,8 @@ Agent: Got it. I've noted your tooth sensitivity. I'm checking with the doctor's
         loadMetricsAndHistory(),
         loadInstances(),
         loadDefinitions(),
-        loadSchemas()
+        loadSchemas(),
+        loadConversations()
       ]);
     } catch (err: any) {
       error = err.message || 'Could not load actions data.';
@@ -139,6 +148,182 @@ Agent: Got it. I've noted your tooth sensitivity. I'm checking with the doctor's
       schemas = data.schemas || [];
       defaultFields = data.defaultFields || [];
     }
+  }
+
+  async function loadConversations() {
+    try {
+      const res = await fetch('/api/actions/conversations');
+      if (res.ok) {
+        const data = await res.json();
+        conversations = data.conversations || [];
+        if (selectedConversation) {
+          const fresh = conversations.find(c => c.id === selectedConversation.id);
+          if (fresh) selectedConversation = { ...fresh, fullSummary: selectedConversation.fullSummary };
+        } else if (conversations.length > 0 && !selectedConversation) {
+          selectConversation(conversations[0]);
+        }
+      }
+    } catch (err: any) {
+      console.error('Failed to load conversations:', err);
+    }
+  }
+
+  async function selectConversation(conv: any) {
+    selectedConversation = conv;
+    // If the conversation has a summary, fetch the full enriched summary if not already loaded
+    if (conv?.callSummary?.id && (!conv.fullSummary || conv.fullSummary.id !== conv.callSummary.id)) {
+      intelligenceLoading = true;
+      try {
+        const res = await fetch(`/api/actions/summarize?conversationId=${conv.id}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.summary) {
+            selectedConversation = {
+              ...selectedConversation,
+              fullSummary: data.summary,
+              rawTranscriptText: data.conversation?.rawTranscriptText || selectedConversation.rawTranscriptText,
+              actions: data.actions || selectedConversation.actions
+            };
+          }
+        }
+      } catch (err) {
+        console.error('Failed to load full summary:', err);
+      } finally {
+        intelligenceLoading = false;
+      }
+    }
+  }
+
+  async function triggerSummarize(convId: string) {
+    summarizingConvId = convId;
+    try {
+      const res = await fetch('/api/actions/summarize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ conversationId: convId, model: primaryModel })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Summarization failed');
+      notify('AI Call Summary generated successfully.');
+      await loadConversations();
+      const updated = conversations.find(c => c.id === convId);
+      if (updated) {
+        await selectConversation(updated);
+      }
+    } catch (err: any) {
+      error = err.message;
+    } finally {
+      summarizingConvId = null;
+    }
+  }
+
+  async function copySummary(conv: any) {
+    const s = conv?.fullSummary || conv?.callSummary;
+    if (!s) return;
+    const text = [
+      `# ${s.title || 'Call Summary'}`,
+      `Outcome: ${s.callOutcome || 'N/A'}`,
+      `Customer Intent: ${s.customerIntent || 'N/A'}`,
+      `\n## Executive Summary\n${s.executiveSummary || 'N/A'}`,
+      s.keyDiscussionPoints?.length ? `\n## Key Discussion Points\n${s.keyDiscussionPoints.map((p: string) => `- ${p}`).join('\n')}` : '',
+      s.customerRequirements?.length ? `\n## Customer Requirements\n${s.customerRequirements.map((r: string) => `- ${r}`).join('\n')}` : '',
+      s.importantCommitments?.length ? `\n## Commitments\n${s.importantCommitments.map((c: any) => `- [${c.madeBy || 'Party'} | ${c.status || 'open'}] ${c.commitment}`).join('\n')}` : '',
+      s.followUpTasks?.length ? `\n## Follow-Up Tasks\n${s.followUpTasks.map((t: any) => `- [${t.owner || 'Unassigned'} | ${t.priority || 'medium'}] ${t.task}`).join('\n')}` : '',
+      s.unresolvedIssues?.length ? `\n## Unresolved Issues\n${s.unresolvedIssues.map((u: string) => `- ${u}`).join('\n')}` : ''
+    ].filter(Boolean).join('\n');
+
+    try {
+      await navigator.clipboard.writeText(text);
+      notify('Summary copied to clipboard!');
+    } catch {
+      notify('Failed to copy to clipboard.');
+    }
+  }
+
+  function exportSummary(conv: any) {
+    const s = conv?.fullSummary || conv?.callSummary;
+    if (!s) return;
+    const lines = [
+      '================================================================',
+      '                     AI CALL INTELLIGENCE REPORT                ',
+      '================================================================',
+      `Title:        ${s.title || 'Call Summary'}`,
+      `Outcome:      ${s.callOutcome || 'N/A'}`,
+      `Date:         ${new Date(conv.createdAt).toLocaleString()}`,
+      `Agent ID:     ${conv.agentId || 'Default Agent'}`,
+      `Conversation: ${conv.id}`,
+      '----------------------------------------------------------------',
+      '1. EXECUTIVE SUMMARY',
+      '----------------------------------------------------------------',
+      s.executiveSummary || 'No summary available.',
+      '',
+      `Customer Intent: ${s.customerIntent || 'N/A'}`,
+      ''
+    ];
+
+    if (s.keyDiscussionPoints?.length) {
+      lines.push('----------------------------------------------------------------');
+      lines.push('2. KEY DISCUSSION POINTS');
+      lines.push('----------------------------------------------------------------');
+      s.keyDiscussionPoints.forEach((p: string) => lines.push(`• ${p}`));
+      lines.push('');
+    }
+
+    if (s.customerRequirements?.length) {
+      lines.push('----------------------------------------------------------------');
+      lines.push('3. CUSTOMER REQUIREMENTS');
+      lines.push('----------------------------------------------------------------');
+      s.customerRequirements.forEach((r: string) => lines.push(`• ${r}`));
+      lines.push('');
+    }
+
+    if (s.importantCommitments?.length) {
+      lines.push('----------------------------------------------------------------');
+      lines.push('4. IMPORTANT COMMITMENTS');
+      lines.push('----------------------------------------------------------------');
+      s.importantCommitments.forEach((c: any) => lines.push(`• [${c.madeBy?.toUpperCase() || 'PARTY'} - ${c.status || 'open'}] ${c.commitment}`));
+      lines.push('');
+    }
+
+    if (s.followUpTasks?.length) {
+      lines.push('----------------------------------------------------------------');
+      lines.push('5. ACTIONABLE FOLLOW-UP TASKS');
+      lines.push('----------------------------------------------------------------');
+      s.followUpTasks.forEach((t: any) => lines.push(`• [${t.priority?.toUpperCase() || 'NORMAL'}] (${t.owner || 'agent'}) ${t.task}`));
+      lines.push('');
+    }
+
+    if (s.unresolvedIssues?.length) {
+      lines.push('----------------------------------------------------------------');
+      lines.push('6. UNRESOLVED ISSUES');
+      lines.push('----------------------------------------------------------------');
+      s.unresolvedIssues.forEach((u: string) => lines.push(`• ${u}`));
+      lines.push('');
+    }
+
+    if (s.extractedEntities?.length) {
+      lines.push('----------------------------------------------------------------');
+      lines.push('7. EXTRACTED ENTITIES');
+      lines.push('----------------------------------------------------------------');
+      s.extractedEntities.forEach((ent: any) => lines.push(`• ${ent.entity}: ${ent.value} (${ent.category || 'general'}, conf: ${Math.round((ent.confidence || 1) * 100)}%)`));
+      lines.push('');
+    }
+
+    if (conv.rawTranscriptText) {
+      lines.push('================================================================');
+      lines.push('                     RAW TRANSCRIPT                             ');
+      lines.push('================================================================');
+      lines.push(conv.rawTranscriptText);
+    }
+
+    const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `call-summary-${(s.title || 'call').toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 30)}-${conv.id.slice(0, 8)}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+    notify('Call report exported as text.');
   }
 
   // Inbox operations
@@ -419,6 +604,9 @@ Agent: Got it. I've noted your tooth sensitivity. I'm checking with the doctor's
       </button>
       <button class:active={activeTab==='history'} onclick={()=>activeTab='history'}>
         <Terminal size={14}/> Execution History
+      </button>
+      <button class:active={activeTab==='intelligence'} onclick={()=>activeTab='intelligence'}>
+        <FileText size={14}/> Call Intelligence
       </button>
       <button class:active={activeTab==='demo'} class="demo-btn" onclick={()=>activeTab='demo'}>
         <Sparkles size={14}/> Live Demo Lab
@@ -1093,6 +1281,32 @@ Agent: Got it. I've noted your tooth sensitivity. I'm checking with the doctor's
                 {/each}
               </div>
 
+              {#if demoResult.summary}
+                <div class="demo-summary-box demo-intel-box">
+                  <div class="demo-intel-header">
+                    <span class="label cyan">AI EXECUTIVE SUMMARY</span>
+                    {#if demoResult.summary.callOutcome}
+                      <span class="badge blue">{demoResult.summary.callOutcome}</span>
+                    {/if}
+                  </div>
+                  <h4>{demoResult.summary.title}</h4>
+                  <p class="muted tiny">{demoResult.summary.executiveSummary}</p>
+
+                  {#if demoResult.summary.followUpTasks && demoResult.summary.followUpTasks.length > 0}
+                    <div class="intel-tasks-preview">
+                      <span class="sub-label">FOLLOW-UP TASKS</span>
+                      <div class="mini-task-tags">
+                        {#each demoResult.summary.followUpTasks as task}
+                          <span class="mini-task-tag">
+                            <span class="tag-owner">{task.owner || 'agent'}:</span> {task.task}
+                          </span>
+                        {/each}
+                      </div>
+                    </div>
+                  {/if}
+                </div>
+              {/if}
+
               <div class="proposed-action-card">
                 <div class="pa-header">
                   <span class="badge amber">PROPOSED OPERATION</span>
@@ -1108,6 +1322,411 @@ Agent: Got it. I've noted your tooth sensitivity. I'm checking with the doctor's
             </div>
           {/if}
         </div>
+      </div>
+    </section>
+  {/if}
+
+  <!-- TAB: CALL INTELLIGENCE -->
+  {#if activeTab === 'intelligence'}
+    <section class="tab-pane intel-pane">
+      <div class="intel-layout">
+        <!-- Left Panel: Conversation List with summary scan -->
+        <aside class="intel-sidebar">
+          <div class="sidebar-top">
+            <div class="search-box-row">
+              <Search size={14}/>
+              <input
+                type="text"
+                placeholder="Filter by caller, title, outcome..."
+                bind:value={intelligenceSearch}
+              />
+            </div>
+            <div class="sidebar-counts">
+              <span>{conversations.length} conversation{conversations.length === 1 ? '' : 's'}</span>
+              <button class="ghost-refresh" onclick={loadConversations} title="Refresh conversation list">
+                <RefreshCw size={13}/>
+              </button>
+            </div>
+          </div>
+
+          <div class="conv-items-scroll">
+            {#if conversations.length === 0}
+              <div class="empty-list-notice">
+                <p>No conversations recorded yet.</p>
+                <button class="btn-xs" onclick={()=>activeTab='demo'}>Try Live Demo Lab</button>
+              </div>
+            {:else}
+              {@const filtered = conversations.filter(c => {
+                if (!intelligenceSearch) return true;
+                const q = intelligenceSearch.toLowerCase();
+                const title = c.callSummary?.title?.toLowerCase() || '';
+                const intent = (c.callSummary?.customerIntent || c.extraction?.intent || '').toLowerCase();
+                const outcome = (c.callSummary?.callOutcome || '').toLowerCase();
+                const transcript = (c.rawTranscriptText || '').toLowerCase();
+                return title.includes(q) || intent.includes(q) || outcome.includes(q) || transcript.includes(q);
+              })}
+              {#if filtered.length === 0}
+                <div class="empty-list-notice">
+                  <p>No matching calls found.</p>
+                </div>
+              {:else}
+                {#each filtered as conv (conv.id)}
+                  {@const isSelected = selectedConversation?.id === conv.id}
+                  {@const hasSummary = Boolean(conv.callSummary)}
+                  <div
+                    class="conv-card-item"
+                    class:selected={isSelected}
+                    role="button"
+                    tabindex="0"
+                    onclick={() => selectConversation(conv)}
+                    onkeydown={(e) => e.key === 'Enter' && selectConversation(conv)}
+                  >
+                    <div class="conv-card-header">
+                      <strong class="conv-title" title={conv.callSummary?.title || 'Voice Call'}>
+                        {conv.callSummary?.title || (conv.metadata?.agentName ? `${conv.metadata.agentName} Call` : 'Inbound Voice Call')}
+                      </strong>
+                      <span class="conv-date">{new Date(conv.createdAt).toLocaleDateString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+                    </div>
+
+                    <!-- Summary scan preview (no need to open transcript) -->
+                    {#if conv.callSummary?.executiveSummary}
+                      <p class="conv-snippet">{conv.callSummary.executiveSummary.slice(0, 110)}...</p>
+                    {:else if conv.extraction?.summary}
+                      <p class="conv-snippet">{conv.extraction.summary.slice(0, 110)}...</p>
+                    {:else if conv.rawTranscriptText}
+                      <p class="conv-snippet transcript-snip">{conv.rawTranscriptText.slice(0, 100)}...</p>
+                    {:else}
+                      <p class="conv-snippet muted">No transcript available</p>
+                    {/if}
+
+                    <div class="conv-card-footer">
+                      <div class="badge-cluster">
+                        {#if conv.callSummary?.callOutcome}
+                          <span class="pill outcome-pill">{conv.callSummary.callOutcome}</span>
+                        {/if}
+                        {#if conv.callSummary?.followUpTasks && conv.callSummary.followUpTasks.length > 0}
+                          <span class="pill task-pill">{conv.callSummary.followUpTasks.length} task{conv.callSummary.followUpTasks.length === 1 ? '' : 's'}</span>
+                        {/if}
+                        {#if conv.actions && conv.actions.length > 0}
+                          <span class="pill action-pill">{conv.actions.length} action{conv.actions.length === 1 ? '' : 's'}</span>
+                        {/if}
+                      </div>
+
+                      {#if !hasSummary}
+                        <button
+                          class="summarize-btn-inline"
+                          disabled={summarizingConvId === conv.id}
+                          onclick={(e) => { e.stopPropagation(); triggerSummarize(conv.id); }}
+                          title="Generate structured AI summary"
+                        >
+                          {#if summarizingConvId === conv.id}
+                            <RefreshCw size={11} class="spin"/> Summarizing...
+                          {:else}
+                            <Sparkles size={11}/> Summarize
+                          {/if}
+                        </button>
+                      {/if}
+                    </div>
+                  </div>
+                {/each}
+              {/if}
+            {/if}
+          </div>
+        </aside>
+
+        <!-- Right Panel: Full Call Intelligence View -->
+        <main class="intel-main">
+          {#if !selectedConversation}
+            <div class="intel-empty-state">
+              <FileText size={44}/>
+              <h3>Select a Call to View AI Intelligence</h3>
+              <p>Review comprehensive structured summaries, customer intents, commitments, action proposals, and verified transcripts.</p>
+            </div>
+          {:else}
+            {@const conv = selectedConversation}
+            {@const s = conv.fullSummary || conv.callSummary}
+            {@const e = conv.extraction}
+            <div class="intel-content-wrapper">
+              <!-- Top Header Bar -->
+              <div class="intel-top-bar">
+                <div class="intel-header-info">
+                  <div class="intel-eyebrow">
+                    <span class="source-tag">{conv.source?.toUpperCase() || 'SYNTHETIC'} CALL</span>
+                    <span class="dot-separator">•</span>
+                    <span class="conv-id-code">ID: {conv.id.slice(0, 8)}</span>
+                    <span class="dot-separator">•</span>
+                    <span>{new Date(conv.createdAt).toLocaleString()}</span>
+                  </div>
+                  <h2 class="intel-main-title">{s?.title || (e?.intent ? `Call: ${e.intent}` : 'Voice Call Intelligence')}</h2>
+                </div>
+
+                <div class="intel-actions-row">
+                  {#if !s}
+                    <button
+                      class="primary-glow-btn"
+                      disabled={summarizingConvId === conv.id}
+                      onclick={() => triggerSummarize(conv.id)}
+                    >
+                      {#if summarizingConvId === conv.id}
+                        <RefreshCw size={13} class="spin"/> Generating Summary...
+                      {:else}
+                        <Sparkles size={13}/> Generate Full Summary
+                      {/if}
+                    </button>
+                  {:else}
+                    <button class="secondary-btn" onclick={() => copySummary(conv)} title="Copy markdown summary">
+                      <Copy size={13}/> Copy
+                    </button>
+                    <button class="secondary-btn" onclick={() => exportSummary(conv)} title="Download full text report">
+                      <Download size={13}/> Export Report
+                    </button>
+                    <button
+                      class="ghost-btn"
+                      disabled={summarizingConvId === conv.id}
+                      onclick={() => triggerSummarize(conv.id)}
+                      title="Re-run Groq summarization"
+                    >
+                      <RefreshCw size={13} class={summarizingConvId === conv.id ? 'spin' : ''}/>
+                    </button>
+                  {/if}
+                </div>
+              </div>
+
+              {#if intelligenceLoading}
+                <div class="intel-loading-banner">
+                  <RefreshCw size={15} class="spin"/> Loading complete call intelligence package...
+                </div>
+              {/if}
+
+              <!-- Intelligence Grid Sections -->
+              <div class="intel-grid">
+                <!-- 1. Executive Summary Card (Full Span) -->
+                <div class="intel-card full-col executive-card">
+                  <div class="intel-card-header">
+                    <div class="section-tag-group">
+                      <span class="card-eyebrow">EXECUTIVE SUMMARY</span>
+                      {#if s?.callOutcome}
+                        <span class="badge blue-glow">{s.callOutcome}</span>
+                      {/if}
+                      {#if s?.groqModel}
+                        <span class="model-tag">Groq {s.groqModel.split('/').pop()}</span>
+                      {/if}
+                    </div>
+                  </div>
+                  <p class="executive-text">{s?.executiveSummary || e?.summary || 'No summary generated yet. Click "Generate Full Summary" above to process transcript with Groq.'}</p>
+
+                  <div class="executive-meta-row">
+                    <div class="meta-item">
+                      <span class="meta-label">Customer Intent</span>
+                      <strong class="meta-val">{s?.customerIntent || e?.intent || 'Not specified'}</strong>
+                    </div>
+                    <div class="meta-item">
+                      <span class="meta-label">Call Outcome</span>
+                      <strong class="meta-val">{s?.callOutcome || 'In Progress / Completed'}</strong>
+                    </div>
+                    <div class="meta-item">
+                      <span class="meta-label">Recording Source</span>
+                      <strong class="meta-val">{conv.source || 'voice_session'}</strong>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- 2. Key Discussion Points -->
+                <div class="intel-card">
+                  <div class="intel-card-header">
+                    <span class="card-eyebrow">KEY DISCUSSION POINTS</span>
+                  </div>
+                  {#if s?.keyDiscussionPoints && s.keyDiscussionPoints.length > 0}
+                    <ul class="intel-bullet-list">
+                      {#each s.keyDiscussionPoints as point}
+                        <li>{point}</li>
+                      {/each}
+                    </ul>
+                  {:else}
+                    <p class="empty-hint">No key points extracted or transcript too brief.</p>
+                  {/if}
+                </div>
+
+                <!-- 3. Customer Requirements -->
+                <div class="intel-card">
+                  <div class="intel-card-header">
+                    <span class="card-eyebrow">CUSTOMER REQUIREMENTS</span>
+                  </div>
+                  {#if s?.customerRequirements && s.customerRequirements.length > 0}
+                    <ul class="intel-bullet-list requirement-list">
+                      {#each s.customerRequirements as req}
+                        <li>{req}</li>
+                      {/each}
+                    </ul>
+                  {:else}
+                    <p class="empty-hint">No explicit requirements stated by customer.</p>
+                  {/if}
+                </div>
+
+                <!-- 4. Important Commitments -->
+                <div class="intel-card">
+                  <div class="intel-card-header">
+                    <span class="card-eyebrow">IMPORTANT COMMITMENTS</span>
+                  </div>
+                  {#if s?.importantCommitments && s.importantCommitments.length > 0}
+                    <div class="commitments-container">
+                      {#each s.importantCommitments as item}
+                        <div class="commitment-item">
+                          <div class="commitment-top">
+                            <span class="party-tag" class:agent-tag={item.madeBy === 'agent'} class:customer-tag={item.madeBy === 'customer'}>
+                              {item.madeBy?.toUpperCase() || 'PARTY'}
+                            </span>
+                            <span class="status-tag status-{item.status || 'open'}">{item.status || 'open'}</span>
+                          </div>
+                          <p class="commitment-text">{item.commitment}</p>
+                        </div>
+                      {/each}
+                    </div>
+                  {:else}
+                    <p class="empty-hint">No explicit commitments recorded during call.</p>
+                  {/if}
+                </div>
+
+                <!-- 5. Actionable Follow-up Tasks -->
+                <div class="intel-card">
+                  <div class="intel-card-header">
+                    <span class="card-eyebrow">FOLLOW-UP REQUIREMENTS & TASKS</span>
+                  </div>
+                  {#if s?.followUpTasks && s.followUpTasks.length > 0}
+                    <div class="tasks-container">
+                      {#each s.followUpTasks as task}
+                        <div class="task-card-row">
+                          <div class="task-row-top">
+                            <span class="priority-tag priority-{task.priority || 'medium'}">
+                              {(task.priority || 'MEDIUM').toUpperCase()}
+                            </span>
+                            <span class="owner-pill">{task.owner || 'agent'}</span>
+                          </div>
+                          <p class="task-desc">{task.task}</p>
+                        </div>
+                      {/each}
+                    </div>
+                  {:else}
+                    <p class="empty-hint">No outstanding follow-up tasks required.</p>
+                  {/if}
+                </div>
+
+                <!-- 6. Unresolved Issues -->
+                <div class="intel-card">
+                  <div class="intel-card-header">
+                    <span class="card-eyebrow">UNRESOLVED ISSUES</span>
+                  </div>
+                  {#if s?.unresolvedIssues && s.unresolvedIssues.length > 0}
+                    <ul class="intel-bullet-list warning-list">
+                      {#each s.unresolvedIssues as issue}
+                        <li>{issue}</li>
+                      {/each}
+                    </ul>
+                  {:else}
+                    <p class="empty-hint positive">✓ No unresolved issues detected.</p>
+                  {/if}
+                </div>
+
+                <!-- 7. Extracted Entities & Values -->
+                <div class="intel-card">
+                  <div class="intel-card-header">
+                    <span class="card-eyebrow">EXTRACTED ENTITIES</span>
+                  </div>
+                  {#if s?.extractedEntities && s.extractedEntities.length > 0}
+                    <div class="entity-chips-grid">
+                      {#each s.extractedEntities as ent}
+                        <div class="entity-chip">
+                          <span class="ent-name">{ent.entity}:</span>
+                          <span class="ent-val">{ent.value}</span>
+                          {#if ent.category}
+                            <span class="ent-cat">{ent.category}</span>
+                          {/if}
+                        </div>
+                      {/each}
+                    </div>
+                  {:else if e?.fields && e.fields.length > 0}
+                    <div class="entity-chips-grid">
+                      {#each e.fields as f}
+                        <div class="entity-chip">
+                          <span class="ent-name">{f.name}:</span>
+                          <span class="ent-val">{String(f.value ?? 'null')}</span>
+                          <span class="ent-cat">{Math.round(f.confidence * 100)}%</span>
+                        </div>
+                      {/each}
+                    </div>
+                  {:else}
+                    <p class="empty-hint">No structured entities extracted.</p>
+                  {/if}
+                </div>
+
+                <!-- 8. Proposed Business Actions & Execution Status (Full Span) -->
+                <div class="intel-card full-col">
+                  <div class="intel-card-header">
+                    <span class="card-eyebrow">AUTONOMOUS BUSINESS ACTIONS</span>
+                    <span class="sub-muted">Generated from structured extraction</span>
+                  </div>
+                  {#if conv.actions && conv.actions.length > 0}
+                    <div class="intel-actions-list">
+                      {#each conv.actions as act}
+                        <div class="intel-action-item">
+                          <div class="ia-left">
+                            <strong>{act.name}</strong>
+                            <span class="ia-desc">{act.description || 'Webhook execution'}</span>
+                            <span class="badge status-badge status-{act.status}">{act.status}</span>
+                          </div>
+                          <div class="ia-payload">
+                            <code>{JSON.stringify(act.payload)}</code>
+                          </div>
+                          <div class="ia-right">
+                            {#if act.status === 'awaiting_approval'}
+                              <button class="primary btn-xs" onclick={() => approveInstance(act)}>
+                                <Check size={12}/> Approve & Run
+                              </button>
+                            {:else if act.status === 'executed'}
+                              <span class="executed-check"><CheckCircle2 size={14}/> Executed</span>
+                            {:else if act.status === 'failed'}
+                              <button class="retry-btn btn-xs" onclick={() => retryInstance(act)}>
+                                <RefreshCw size={12}/> Retry
+                              </button>
+                            {/if}
+                          </div>
+                        </div>
+                      {/each}
+                    </div>
+                  {:else}
+                    <p class="empty-hint">No automated business actions proposed for this conversation.</p>
+                  {/if}
+                </div>
+
+                <!-- 9. Full Verified Transcript (Full Span) -->
+                <div class="intel-card full-col">
+                  <div class="intel-card-header">
+                    <span class="card-eyebrow">CONVERSATION TRANSCRIPT</span>
+                    {#if conv.metadata?.agentName}
+                      <span class="agent-pill">{conv.metadata.agentName}</span>
+                    {/if}
+                  </div>
+                  {#if conv.rawTranscriptText}
+                    <div class="transcript-box">
+                      <pre>{conv.rawTranscriptText}</pre>
+                    </div>
+                  {:else if conv.transcript && Array.isArray(conv.transcript) && conv.transcript.length > 0}
+                    <div class="transcript-messages">
+                      {#each conv.transcript as msg}
+                        <div class="transcript-msg msg-{msg.role || 'caller'}">
+                          <span class="msg-role">{(msg.role || 'Caller').toUpperCase()}</span>
+                          <span class="msg-content">{msg.content || msg.text || ''}</span>
+                        </div>
+                      {/each}
+                    </div>
+                  {:else}
+                    <p class="empty-hint">No transcript text preserved for this call.</p>
+                  {/if}
+                </div>
+              </div>
+            </div>
+          {/if}
+        </main>
       </div>
     </section>
   {/if}
@@ -1914,5 +2533,764 @@ Agent: Got it. I've noted your tooth sensitivity. I'm checking with the doctor's
   .label.green {
     color: #34d399;
     font: 10px 'DM Mono', monospace;
+  }
+
+  /* =========================================================================
+     CALL INTELLIGENCE & SUMMARIZATION STYLES
+     ========================================================================= */
+
+  /* Demo Lab Intelligence Preview Card */
+  .demo-intel-box {
+    border-color: #1e3a5f;
+    background: #0d1a29;
+    position: relative;
+  }
+  .demo-intel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+  }
+  .intel-tasks-preview {
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top: 1px dashed #1e293b;
+  }
+  .sub-label {
+    font: 9px 'DM Mono', monospace;
+    color: #64748b;
+    letter-spacing: 0.05em;
+    display: block;
+    margin-bottom: 4px;
+  }
+  .mini-task-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .mini-task-tag {
+    font-size: 10px;
+    background: #132238;
+    border: 1px solid #1e3a5f;
+    color: #93c5fd;
+    padding: 2px 7px;
+    border-radius: 4px;
+  }
+  .mini-task-tag .tag-owner {
+    color: #60a5fa;
+    font-weight: 600;
+  }
+
+  /* Intelligence Main Tab Layout */
+  .intel-pane {
+    padding: 0;
+  }
+  .intel-layout {
+    display: grid;
+    grid-template-columns: 340px 1fr;
+    min-height: 720px;
+    background: #090b14;
+    border: 1px solid #1d2238;
+    border-radius: 12px;
+    overflow: hidden;
+  }
+
+  /* Left Sidebar: Call List */
+  .intel-sidebar {
+    border-right: 1px solid #1d2238;
+    background: #0d1020;
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+  }
+  .sidebar-top {
+    padding: 14px 14px 10px;
+    border-bottom: 1px solid #1a1e34;
+    display: grid;
+    gap: 10px;
+  }
+  .search-box-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: #14182e;
+    border: 1px solid #242b4d;
+    padding: 6px 10px;
+    border-radius: 6px;
+    color: #64748b;
+  }
+  .search-box-row input {
+    background: transparent;
+    border: none;
+    outline: none;
+    color: #f1f5f9;
+    font-size: 12px;
+    width: 100%;
+  }
+  .sidebar-counts {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 11px;
+    color: #64748b;
+    font-family: 'DM Mono', monospace;
+  }
+  .ghost-refresh {
+    background: transparent;
+    border: none;
+    color: #94a3b8;
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 4px;
+    display: inline-flex;
+    align-items: center;
+    transition: all 0.2s;
+  }
+  .ghost-refresh:hover {
+    color: #38bdf8;
+    background: #1e2440;
+  }
+  .conv-items-scroll {
+    overflow-y: auto;
+    max-height: calc(100vh - 280px);
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .empty-list-notice {
+    padding: 40px 16px;
+    text-align: center;
+    color: #64748b;
+    font-size: 12px;
+    display: grid;
+    gap: 8px;
+    place-content: center;
+  }
+  .conv-card-item {
+    background: #12162a;
+    border: 1px solid #1c223c;
+    border-radius: 8px;
+    padding: 10px 12px;
+    cursor: pointer;
+    text-align: left;
+    transition: all 0.18s ease;
+    display: grid;
+    gap: 6px;
+  }
+  .conv-card-item:hover {
+    background: #181d38;
+    border-color: #2e3760;
+  }
+  .conv-card-item.selected {
+    background: #1b2140;
+    border-color: #6366f1;
+    box-shadow: 0 0 12px rgba(99, 102, 241, 0.18);
+  }
+  .conv-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 6px;
+  }
+  .conv-title {
+    font-size: 12px;
+    color: #f1f5f9;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 190px;
+  }
+  .conv-date {
+    font-size: 10px;
+    color: #64748b;
+    font-family: 'DM Mono', monospace;
+    white-space: nowrap;
+  }
+  .conv-snippet {
+    font-size: 11px;
+    color: #94a3b8;
+    margin: 0;
+    line-height: 1.35;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .transcript-snip {
+    color: #64748b;
+    font-style: italic;
+  }
+  .conv-card-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 6px;
+    margin-top: 2px;
+  }
+  .badge-cluster {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+  }
+  .pill {
+    font-size: 9px;
+    font-family: 'DM Mono', monospace;
+    padding: 2px 5px;
+    border-radius: 4px;
+    white-space: nowrap;
+  }
+  .outcome-pill {
+    background: #0f2d42;
+    color: #38bdf8;
+    border: 1px solid #164e63;
+  }
+  .task-pill {
+    background: #271a06;
+    color: #fbbf24;
+    border: 1px solid #78350f;
+  }
+  .action-pill {
+    background: #1e1338;
+    color: #c084fc;
+    border: 1px solid #581c87;
+  }
+  .summarize-btn-inline {
+    font-size: 10px;
+    padding: 2px 7px;
+    background: #1f274a;
+    border: 1px solid #384578;
+    color: #a5b4fc;
+    border-radius: 4px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    transition: all 0.2s;
+  }
+  .summarize-btn-inline:hover:not(:disabled) {
+    background: #313d75;
+    color: #fff;
+  }
+
+  /* Right Main: Detailed Intel View */
+  .intel-main {
+    background: #090b14;
+    overflow-y: auto;
+    max-height: calc(100vh - 280px);
+    padding: 24px 28px;
+  }
+  .intel-empty-state {
+    height: 100%;
+    display: grid;
+    place-content: center;
+    text-align: center;
+    color: #475569;
+    padding: 60px 20px;
+    gap: 12px;
+    max-width: 440px;
+    margin: 0 auto;
+  }
+  .intel-empty-state h3 {
+    color: #cbd5e1;
+    margin: 0;
+    font-size: 16px;
+  }
+  .intel-empty-state p {
+    font-size: 12px;
+    line-height: 1.5;
+  }
+  .intel-top-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 16px;
+    padding-bottom: 18px;
+    border-bottom: 1px solid #1c223c;
+    margin-bottom: 18px;
+  }
+  .intel-eyebrow {
+    font-size: 11px;
+    color: #64748b;
+    font-family: 'DM Mono', monospace;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 4px;
+  }
+  .source-tag {
+    color: #a5b4fc;
+    font-weight: 600;
+  }
+  .dot-separator {
+    color: #334155;
+  }
+  .conv-id-code {
+    color: #94a3b8;
+  }
+  .intel-main-title {
+    font-size: 20px;
+    font-weight: 700;
+    color: #f8fafc;
+    margin: 0;
+    letter-spacing: -0.01em;
+  }
+  .intel-actions-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+  .primary-glow-btn {
+    background: linear-gradient(135deg, #6366f1, #8b5cf6);
+    color: #fff;
+    border: none;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 7px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    box-shadow: 0 0 16px rgba(99, 102, 241, 0.4);
+    transition: all 0.2s;
+  }
+  .primary-glow-btn:hover:not(:disabled) {
+    box-shadow: 0 0 24px rgba(99, 102, 241, 0.6);
+    transform: translateY(-1px);
+  }
+  .secondary-btn {
+    background: #14182c;
+    border: 1px solid #273056;
+    color: #cbd5e1;
+    font-size: 12px;
+    padding: 6px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: all 0.15s;
+  }
+  .secondary-btn:hover {
+    background: #1f274a;
+    border-color: #3e4c85;
+    color: #fff;
+  }
+  .ghost-btn {
+    background: transparent;
+    border: 1px solid #222949;
+    color: #94a3b8;
+    padding: 6px 8px;
+    border-radius: 6px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    transition: all 0.15s;
+  }
+  .ghost-btn:hover:not(:disabled) {
+    background: #161c36;
+    color: #38bdf8;
+  }
+  .intel-loading-banner {
+    background: #0f1c30;
+    border: 1px solid #1e3a5f;
+    color: #38bdf8;
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 14px;
+  }
+
+  /* Grid of Intelligence Cards */
+  .intel-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+  .intel-card {
+    background: #0f1222;
+    border: 1px solid #1d223c;
+    border-radius: 10px;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .intel-card.full-col {
+    grid-column: 1 / -1;
+  }
+  .intel-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .section-tag-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .card-eyebrow {
+    font: 10px 'DM Mono', monospace;
+    letter-spacing: 0.08em;
+    color: #64748b;
+    font-weight: 600;
+  }
+  .model-tag {
+    font-size: 9px;
+    font-family: 'DM Mono', monospace;
+    background: #1a1e36;
+    color: #94a3b8;
+    padding: 2px 6px;
+    border-radius: 4px;
+    border: 1px solid #252b4d;
+  }
+  .blue-glow {
+    background: #0b253b;
+    color: #38bdf8;
+    border: 1px solid #164e63;
+    font-size: 10px;
+    padding: 2px 8px;
+  }
+  .sub-muted {
+    font-size: 11px;
+    color: #64748b;
+  }
+
+  /* Executive Card */
+  .executive-card {
+    background: linear-gradient(180deg, #12172f 0%, #0d1022 100%);
+    border-color: #2b3562;
+  }
+  .executive-text {
+    font-size: 14px;
+    line-height: 1.6;
+    color: #e2e8f0;
+    margin: 4px 0 10px;
+  }
+  .executive-meta-row {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    padding-top: 12px;
+    border-top: 1px solid #1e2646;
+  }
+  .meta-item {
+    display: grid;
+    gap: 3px;
+  }
+  .meta-label {
+    font-size: 10px;
+    color: #64748b;
+    font-family: 'DM Mono', monospace;
+  }
+  .meta-val {
+    font-size: 12px;
+    color: #f1f5f9;
+  }
+
+  /* Bullet lists */
+  .intel-bullet-list {
+    margin: 0;
+    padding-left: 18px;
+    display: grid;
+    gap: 6px;
+    font-size: 12px;
+    color: #cbd5e1;
+    line-height: 1.45;
+  }
+  .intel-bullet-list li::marker {
+    color: #6366f1;
+  }
+  .requirement-list li::marker {
+    color: #38bdf8;
+  }
+  .warning-list li::marker {
+    color: #f59e0b;
+  }
+
+  /* Commitments */
+  .commitments-container {
+    display: grid;
+    gap: 8px;
+  }
+  .commitment-item {
+    background: #14182e;
+    border: 1px solid #222949;
+    border-radius: 6px;
+    padding: 8px 10px;
+    display: grid;
+    gap: 4px;
+  }
+  .commitment-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .party-tag {
+    font-size: 9px;
+    font-family: 'DM Mono', monospace;
+    font-weight: 700;
+    padding: 1px 6px;
+    border-radius: 3px;
+  }
+  .agent-tag {
+    background: #172554;
+    color: #60a5fa;
+    border: 1px solid #1e40af;
+  }
+  .customer-tag {
+    background: #2e1065;
+    color: #c084fc;
+    border: 1px solid #581c87;
+  }
+  .status-tag {
+    font-size: 9px;
+    font-family: 'DM Mono', monospace;
+    text-transform: uppercase;
+  }
+  .status-tag.status-fulfilled, .status-tag.status-closed {
+    color: #34d399;
+  }
+  .status-tag.status-open, .status-tag.status-pending {
+    color: #fbbf24;
+  }
+  .commitment-text {
+    font-size: 12px;
+    color: #cbd5e1;
+    margin: 0;
+    line-height: 1.35;
+  }
+
+  /* Tasks */
+  .tasks-container {
+    display: grid;
+    gap: 6px;
+  }
+  .task-card-row {
+    background: #13172c;
+    border: 1px solid #202747;
+    border-radius: 6px;
+    padding: 8px 10px;
+    display: grid;
+    gap: 4px;
+  }
+  .task-row-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .priority-tag {
+    font-size: 9px;
+    font-family: 'DM Mono', monospace;
+    font-weight: 700;
+    padding: 1px 6px;
+    border-radius: 3px;
+  }
+  .priority-high {
+    background: #450a0a;
+    color: #f87171;
+    border: 1px solid #991b1b;
+  }
+  .priority-medium {
+    background: #422006;
+    color: #fbbf24;
+    border: 1px solid #92400e;
+  }
+  .priority-low {
+    background: #064e3b;
+    color: #34d399;
+    border: 1px solid #065f46;
+  }
+  .owner-pill {
+    font-size: 10px;
+    color: #94a3b8;
+    font-family: 'DM Mono', monospace;
+  }
+  .task-desc {
+    font-size: 12px;
+    color: #e2e8f0;
+    margin: 0;
+    line-height: 1.35;
+  }
+
+  /* Extracted Entities Chips */
+  .entity-chips-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .entity-chip {
+    background: #13172c;
+    border: 1px solid #222949;
+    border-radius: 6px;
+    padding: 4px 8px;
+    font-size: 11px;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+  }
+  .ent-name {
+    color: #94a3b8;
+  }
+  .ent-val {
+    color: #38bdf8;
+    font-weight: 600;
+  }
+  .ent-cat {
+    font-size: 9px;
+    font-family: 'DM Mono', monospace;
+    color: #64748b;
+    background: #090b14;
+    padding: 1px 4px;
+    border-radius: 3px;
+  }
+
+  /* Actions List inside Intelligence */
+  .intel-actions-list {
+    display: grid;
+    gap: 8px;
+  }
+  .intel-action-item {
+    background: #13172c;
+    border: 1px solid #202747;
+    border-radius: 8px;
+    padding: 10px 14px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+  }
+  .ia-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 260px;
+  }
+  .ia-desc {
+    font-size: 11px;
+    color: #64748b;
+  }
+  .ia-payload {
+    flex: 1;
+    overflow: hidden;
+  }
+  .ia-payload code {
+    font-size: 10px;
+    color: #a5b4fc;
+    font-family: 'DM Mono', monospace;
+    display: block;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .ia-right {
+    white-space: nowrap;
+  }
+  .btn-xs {
+    font-size: 11px;
+    padding: 4px 9px;
+  }
+  .status-badge.status-awaiting_approval {
+    background: #422006;
+    color: #fbbf24;
+    border: 1px solid #92400e;
+  }
+  .status-badge.status-executed {
+    background: #064e3b;
+    color: #34d399;
+    border: 1px solid #065f46;
+  }
+  .status-badge.status-failed {
+    background: #450a0a;
+    color: #f87171;
+    border: 1px solid #991b1b;
+  }
+  .executed-check {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: #34d399;
+    font-size: 11px;
+    font-weight: 600;
+  }
+
+  /* Full Transcript Box */
+  .transcript-box {
+    background: #070910;
+    border: 1px solid #181d33;
+    border-radius: 6px;
+    padding: 12px 14px;
+    max-height: 280px;
+    overflow-y: auto;
+  }
+  .transcript-box pre {
+    margin: 0;
+    font-family: 'DM Mono', monospace;
+    font-size: 11px;
+    line-height: 1.5;
+    color: #94a3b8;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .transcript-messages {
+    display: grid;
+    gap: 6px;
+    max-height: 280px;
+    overflow-y: auto;
+  }
+  .transcript-msg {
+    padding: 6px 10px;
+    border-radius: 6px;
+    font-size: 11px;
+    display: grid;
+    gap: 2px;
+  }
+  .transcript-msg.msg-caller, .transcript-msg.msg-user {
+    background: #141930;
+    border-left: 2px solid #38bdf8;
+  }
+  .transcript-msg.msg-agent, .transcript-msg.msg-assistant {
+    background: #1b1633;
+    border-left: 2px solid #a855f7;
+  }
+  .msg-role {
+    font: 9px 'DM Mono', monospace;
+    color: #64748b;
+    font-weight: 700;
+  }
+  .msg-content {
+    color: #cbd5e1;
+    line-height: 1.35;
+  }
+  .empty-hint {
+    font-size: 11px;
+    color: #64748b;
+    margin: 0;
+    font-style: italic;
+  }
+  .empty-hint.positive {
+    color: #34d399;
+    font-style: normal;
+  }
+  .agent-pill {
+    font-size: 10px;
+    font-family: 'DM Mono', monospace;
+    background: #1b1f3b;
+    color: #cbd5e1;
+    padding: 2px 7px;
+    border-radius: 4px;
+    border: 1px solid #2d3563;
+  }
+  .spin {
+    animation: spin 1s linear infinite;
+  }
+  @keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
   }
 </style>

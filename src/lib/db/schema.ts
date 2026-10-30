@@ -249,6 +249,32 @@ export const actionExecution = pgTable('actionExecution', {
   userIdIdx: index('action_execution_user_id_idx').on(table.userId, table.startedAt)
 }));
 
+export const callSummary = pgTable('callSummary', {
+  id: text('id').primaryKey(),
+  userId: text('userId').notNull().references(() => user.id, { onDelete: 'cascade' }),
+  conversationId: text('conversationId').notNull().references(() => conversationRecord.id, { onDelete: 'cascade' }),
+  agentId: text('agentId').references(() => agent.id, { onDelete: 'set null' }),
+  title: text('title').notNull(),
+  executiveSummary: text('executiveSummary').notNull(),
+  customerIntent: text('customerIntent').notNull(),
+  keyDiscussionPoints: jsonb('keyDiscussionPoints').notNull().default([]), // Array<string>
+  customerRequirements: jsonb('customerRequirements').notNull().default([]), // Array<string>
+  callOutcome: text('callOutcome').notNull(),
+  importantCommitments: jsonb('importantCommitments').notNull().default([]), // Array<{ madeBy: 'customer' | 'agent' | 'mutual', commitment: string, status: 'confirmed' | 'proposed' | 'pending' }>
+  followUpTasks: jsonb('followUpTasks').notNull().default([]), // Array<{ task: string, owner: 'customer' | 'agent' | 'staff', priority: 'high' | 'medium' | 'low', isCompleted: boolean }>
+  unresolvedIssues: jsonb('unresolvedIssues').notNull().default([]), // Array<string>
+  extractedEntities: jsonb('extractedEntities').notNull().default([]), // Array<{ entity: string, value: string, category: string, confidence: number }>
+  groqModel: text('groqModel').notNull(),
+  rawModelOutput: text('rawModelOutput'),
+  status: text('status').notNull().default('completed'), // 'completed' | 'failed'
+  createdAt: timestamp('createdAt', { withTimezone: true }).notNull(),
+  updatedAt: timestamp('updatedAt', { withTimezone: true }).notNull()
+}, (table) => ({
+  convIdx: uniqueIndex('call_summary_conv_idx').on(table.conversationId),
+  userIdIdx: index('call_summary_user_id_idx').on(table.userId),
+  agentIdIdx: index('call_summary_agent_id_idx').on(table.agentId)
+}));
+
 export const dbSchema = {
   user,
   session,
@@ -265,6 +291,8 @@ export const dbSchema = {
   actionDefinition,
   conversationRecord,
   conversationExtraction,
+  callSummary,
   actionInstance,
   actionExecution
 };
+

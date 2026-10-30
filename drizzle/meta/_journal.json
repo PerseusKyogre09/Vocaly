@@ -50,6 +50,13 @@
       "when": 1793357396489,
       "tag": "0006_large_sentinels",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1793361933700,
+      "tag": "0007_fearless_lake",
+      "breakpoints": true
     }
   ]
 }
