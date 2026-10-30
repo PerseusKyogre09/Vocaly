@@ -4,6 +4,7 @@ import { getDatabase } from '../../../lib/db';
 import { agent, phoneCall } from '../../../lib/db/schema';
 import { normalizePhoneNumber, signBridgeToken } from '../../../lib/phone';
 import { getSession } from '../../../lib/session';
+import { recordUnauthorizedResourceAccess, takeRateLimit } from '../../../lib/security-events';
 
 export const prerender = false;
 
@@ -149,6 +150,7 @@ export const GET: APIRoute = async ({ request }) => {
 export const POST: APIRoute = async ({ request }) => {
   const session = await getSession(request);
   if (!session?.user) return Response.json({ error: 'Authentication required.' }, { status: 401 });
+  if (!(await takeRateLimit(session.user.id, 'outbound_phone_call', 10))) return Response.json({ error: 'Call limit reached. Try again in a minute.' }, { status: 429 });
   const body = await request.json().catch(() => null);
   const agentId = body && typeof body === 'object' && typeof body.agentId === 'string' ? body.agentId : '';
   const elevenLabsApiKey = body && typeof body === 'object' && typeof body.elevenLabsApiKey === 'string' ? body.elevenLabsApiKey.trim() : '';
@@ -157,7 +159,10 @@ export const POST: APIRoute = async ({ request }) => {
     const destination = normalizePhoneNumber(body && typeof body === 'object' ? body.destination : '');
     const [selectedAgent] = await getDatabase().select().from(agent)
       .where(and(eq(agent.id, agentId), eq(agent.userId, session.user.id))).limit(1);
-    if (!selectedAgent) return Response.json({ error: 'Agent not found.' }, { status: 404 });
+    if (!selectedAgent) {
+      await recordUnauthorizedResourceAccess(session.user.id, agentId, 'unauthorized_agent_phone_call');
+      return Response.json({ error: 'Agent not found.' }, { status: 404 });
+    }
     if (selectedAgent.status !== 'deployed' || !selectedAgent.elevenLabsAgentId) {
       return Response.json({ error: 'Select a deployed agent before placing a call.' }, { status: 409 });
     }

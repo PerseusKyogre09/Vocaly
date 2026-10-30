@@ -24,6 +24,16 @@ test('compiles connected conversation steps in trigger order',()=>{
   assert.ok(result.instructions.includes('End (success)'));
 });
 
+test('compiles all configured uncertainty and recovery policies into the agent instructions',()=>{
+  const graph={nodes:[
+    {id:'t',type:'trigger_started',data:{config:{}}},
+    {id:'f',type:'fallback',data:{config:{unknownAnswer:'Ask for a source-supported detail.',ambiguousRequest:'Clarify the date.',toolFailure:'Retry once then disclose failure.',knowledgeMiss:'Offer a callback.',securityViolation:'Refuse and resume supported service.',humanEscalation:'Explain that staff are unavailable.',maxRetries:2,timeoutBehavior:'Offer callback.',alternativePath:'End politely.'}}}
+  ],edges:[{id:'a',source:'t',target:'f'}]};
+  const result=compileWorkflow(graph);
+  assert.equal(result.ok,true);
+  for (const phrase of ['unknown answer','ambiguous request','tool failure','knowledge base miss','security violation','human escalation','Retry limit: 2','Alternative path: End politely.']) assert.ok(result.instructions.toLowerCase().includes(phrase.toLowerCase()),phrase);
+});
+
 test('requires both condition branches and emits explicit branching',()=>{
   const graph={nodes:[
     {id:'t',type:'trigger_started',data:{config:{}}},

@@ -3,6 +3,8 @@ import { and, desc, eq } from 'drizzle-orm';
 import { getDatabase } from '../../lib/db';
 import { agent } from '../../lib/db/schema';
 import { getSession } from '../../lib/session';
+import { normalizeSafetySettings, detectPromptAttack } from '../../lib/agent-safety.mjs';
+import { recordSecurityEvent } from '../../lib/security-events';
 
 export const prerender = false;
 
@@ -21,6 +23,8 @@ function agentPayload(body: Record<string, unknown>) {
   if (!name || !instructions || !firstMessage) throw new Error('Name, system instructions, and first message are required.');
   const status = asText(body.status, 'draft');
   if (!allowedStatuses.has(status) || status === 'deployed') throw new Error('Agents can only be saved as draft or failed through this endpoint.');
+  const detection = detectPromptAttack(instructions);
+  if (detection.secretLike) throw new Error('Remove credentials or tokens from the agent instructions before saving.');
   return {
     name,
     description: asText(body.description),
@@ -29,7 +33,7 @@ function agentPayload(body: Record<string, unknown>) {
     voiceId: asText(body.voiceId),
     voiceConfig: asObject(body.voiceConfig),
     language: asText(body.language, 'English'),
-    configuration: config,
+    configuration: { ...config, safety: normalizeSafetySettings(config.safety as any) },
     workflow,
     status
   };
@@ -60,6 +64,7 @@ export const POST: APIRoute = async ({ request }) => {
     await getDatabase().insert(agent).values(record);
     return Response.json({ agent: record }, { status: 201 });
   } catch (error) {
+    if (error instanceof Error && error.message.includes('credentials or tokens')) await recordSecurityEvent({ eventType: 'credential_like_prompt_content', userId: currentUser.id, severity: 'high', detectionResult: 'Credential pattern detected in agent instructions', actionTaken: 'agent_save_rejected' });
     return Response.json({ error: error instanceof Error ? error.message : 'Could not save agent.' }, { status: 400 });
   }
 };
@@ -71,10 +76,18 @@ export const PUT: APIRoute = async ({ request }) => {
   const id = body && typeof body === 'object' && typeof body.id === 'string' ? body.id : '';
   if (!id) return Response.json({ error: 'Agent ID is required.' }, { status: 400 });
   try {
+    const detection = detectPromptAttack(typeof body.systemInstructions === 'string' ? body.systemInstructions : '');
+    if (detection.secretLike) {
+      await recordSecurityEvent({ eventType: 'credential_like_prompt_content', userId: currentUser.id, agentId: id, severity: 'high', detectionResult: 'Credential pattern detected in agent instructions', actionTaken: 'agent_update_rejected' });
+      return Response.json({ error: 'Remove credentials or tokens from the agent instructions before saving.' }, { status: 400 });
+    }
     const values = agentPayload(body as Record<string, unknown>);
     const [updated] = await getDatabase().update(agent).set({ ...values, updatedAt: new Date() })
       .where(and(eq(agent.id, id), eq(agent.userId, currentUser.id))).returning();
-    if (!updated) return Response.json({ error: 'Agent not found.' }, { status: 404 });
+    if (!updated) {
+      await recordSecurityEvent({ eventType: 'unauthorized_agent_update', userId: currentUser.id, agentId: id, severity: 'high', detectionResult: 'Agent does not belong to authenticated user or does not exist', actionTaken: 'update_rejected' });
+      return Response.json({ error: 'Agent not found.' }, { status: 404 });
+    }
     return Response.json({ agent: updated });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : 'Could not update agent.' }, { status: 400 });
@@ -88,6 +101,9 @@ export const DELETE: APIRoute = async ({ request }) => {
   const id = body && typeof body === 'object' && typeof body.id === 'string' ? body.id : '';
   if (!id) return Response.json({ error: 'Agent ID is required.' }, { status: 400 });
   const deleted = await getDatabase().delete(agent).where(and(eq(agent.id, id), eq(agent.userId, currentUser.id))).returning({ id: agent.id });
-  if (!deleted.length) return Response.json({ error: 'Agent not found.' }, { status: 404 });
+  if (!deleted.length) {
+    await recordSecurityEvent({ eventType: 'unauthorized_agent_delete', userId: currentUser.id, agentId: id, severity: 'high', detectionResult: 'Agent does not belong to authenticated user or does not exist', actionTaken: 'delete_rejected' });
+    return Response.json({ error: 'Agent not found.' }, { status: 404 });
+  }
   return Response.json({ ok: true });
 };

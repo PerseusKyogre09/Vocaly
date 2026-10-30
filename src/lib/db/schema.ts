@@ -1,4 +1,4 @@
-import { boolean, index, jsonb, pgTable, text, timestamp } from 'drizzle-orm/pg-core';
+import { boolean, index, integer, jsonb, pgTable, text, timestamp, uniqueIndex } from 'drizzle-orm/pg-core';
 
 const timestamps = {
   createdAt: timestamp('createdAt', { withTimezone: true }).notNull(),
@@ -115,4 +115,28 @@ export const phoneCall = pgTable('phoneCall', {
   statusIdx: index('phone_call_status_idx').on(table.status)
 }));
 
-export const dbSchema = { user, session, account, verification, workspace, agentRecord, agent, testRun, phoneCall };
+export const securityEvent = pgTable('securityEvent', {
+  id: text('id').primaryKey(),
+  eventType: text('eventType').notNull(),
+  agentId: text('agentId'),
+  userId: text('userId'),
+  severity: text('severity').notNull(),
+  detectionResult: text('detectionResult').notNull(),
+  actionTaken: text('actionTaken').notNull(),
+  createdAt: timestamp('createdAt', { withTimezone: true }).notNull()
+}, (table) => ({
+  userTimeIdx: index('security_event_user_time_idx').on(table.userId, table.createdAt),
+  agentTimeIdx: index('security_event_agent_time_idx').on(table.agentId, table.createdAt)
+}));
+
+export const userRateLimit = pgTable('userRateLimit', {
+  id: text('id').primaryKey(),
+  userId: text('userId').notNull(),
+  scope: text('scope').notNull(),
+  windowStart: timestamp('windowStart', { withTimezone: true }).notNull(),
+  hits: integer('hits').notNull().default(0)
+}, (table) => ({
+  userScope: uniqueIndex('user_rate_limit_scope_unique').on(table.userId, table.scope)
+}));
+
+export const dbSchema = { user, session, account, verification, workspace, agentRecord, agent, testRun, phoneCall, securityEvent, userRateLimit };

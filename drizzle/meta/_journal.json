@@ -29,6 +29,20 @@
       "when": 1793343915079,
       "tag": "0003_gigantic_vivisector",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1793355159695,
+      "tag": "0004_abandoned_betty_ross",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1793355588493,
+      "tag": "0005_organic_puppet_master",
+      "breakpoints": true
     }
   ]
 }
