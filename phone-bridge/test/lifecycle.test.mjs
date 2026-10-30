@@ -17,3 +17,12 @@ test('call can distinguish phone answer from agent connection', () => {
   assert.equal(lifecycle.transition('connected'), true);
   assert.equal(lifecycle.status, 'connected');
 });
+
+test('agent voice failure does not end the Exotel phone call', () => {
+  const lifecycle = createLifecycle();
+  assert.equal(lifecycle.transition('in-progress'), true);
+  assert.equal(lifecycle.transition('agent-unavailable'), true);
+  assert.equal(lifecycle.isTerminal(), false);
+  assert.equal(lifecycle.transition('completed'), true);
+  assert.equal(lifecycle.isTerminal(), true);
+});

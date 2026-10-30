@@ -53,6 +53,14 @@ test('POST /sessions returns JSON for valid and invalid provisioning requests', 
   assert.equal(valid.headers.get('content-type'), 'application/json');
   assert.deepEqual(await valid.json(), { ok: true });
 
+  const noAgentAudio = await fetch(`${baseUrl}/sessions`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${secret}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ callId: 'phone-only-call', agentId: 'regression-agent', elevenLabsAgentId: 'regression-eleven' })
+  });
+  assert.equal(noAgentAudio.status, 201, 'Exotel call sessions can be provisioned when ElevenLabs audio is unavailable.');
+  assert.deepEqual(await noAgentAudio.json(), { ok: true });
+
   const invalid = await fetch(`${baseUrl}/sessions`, {
     method: 'POST',
     headers: { authorization: 'Bearer wrong', 'content-type': 'application/json' },

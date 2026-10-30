@@ -48,7 +48,7 @@ const server = createServer(async (request, response) => {
     for await (const chunk of request) chunks.push(chunk);
     try {
       const body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
-      if (![body.callId, body.agentId, body.elevenLabsAgentId, body.elevenLabsApiKey].every((value) => typeof value === 'string' && value.length > 0)) {
+      if (![body.callId, body.agentId, body.elevenLabsAgentId].every((value) => typeof value === 'string' && value.length > 0) || (body.elevenLabsApiKey !== undefined && typeof body.elevenLabsApiKey !== 'string')) {
         throw new Error('Incomplete bridge session.');
       }
       sessions.put({
@@ -56,7 +56,7 @@ const server = createServer(async (request, response) => {
         agentId: body.agentId,
         elevenLabsAgentId: body.elevenLabsAgentId,
         firstMessage: typeof body.firstMessage === 'string' ? body.firstMessage : '',
-        elevenLabsApiKey: body.elevenLabsApiKey
+        elevenLabsApiKey: body.elevenLabsApiKey || ''
       });
       response.writeHead(201, { 'content-type': 'application/json' });
       response.end(JSON.stringify({ ok: true }));
@@ -89,7 +89,7 @@ sockets.on('connection', async (exotel, payload, initialExotelRate) => {
   let streamSid;
   let terminal = false;
   let elevenReady = false;
-  let elevenOpened = false;
+  let elevenUnavailable = false;
   let elevenInitTimer;
   let queuedAudio = [];
   let elevenInputRate = null;
@@ -109,22 +109,102 @@ sockets.on('connection', async (exotel, payload, initialExotelRate) => {
     await statusUpdate;
     if (terminal) diagnostic('session_closed', { callId: payload.callId, status, ...counts });
   };
+  const markElevenLabsUnavailable = async (reason, error) => {
+    if (elevenUnavailable || terminal) return;
+    elevenUnavailable = true;
+    elevenReady = false;
+    queuedAudio = [];
+    clearTimeout(elevenInitTimer);
+    diagnostic('elevenlabs_unavailable_call_kept_open', { callId: payload.callId, reason, ...(error ? { error } : {}) });
+    await finish('agent-unavailable', { reason, ...(error ? { agentError: error } : {}) });
+    if (eleven?.readyState === WebSocket.OPEN || eleven?.readyState === WebSocket.CONNECTING) eleven.close();
+  };
+  const sendAudioToEleven = (audioBase64, alreadyTranslated = false) => {
+    if (!elevenReady || eleven?.readyState !== WebSocket.OPEN) return false;
+    const pcm = Buffer.from(audioBase64, 'base64');
+    if (!pcm.length) return false;
+    const translated = alreadyTranslated ? audioBase64 : resamplePcm16(pcm, exotelRate, elevenInputRate).toString('base64');
+    eleven.send(JSON.stringify({ user_audio_chunk: translated }), (error) => {
+      if (error) {
+        diagnostic('audio_forward_error', { callId: payload.callId, direction: 'exotel_to_elevenlabs', error: error.message });
+        void markElevenLabsUnavailable('elevenlabs_audio_send_failed', error.message);
+      }
+    });
+    counts.exotelMediaOut++;
+    counts.exotelMediaOutBytes += Buffer.from(translated, 'base64').length;
+    diagnostic('audio_forwarded_to_elevenlabs', { callId: payload.callId, packets: counts.exotelMediaOut, bytes: counts.exotelMediaOutBytes });
+    return true;
+  };
+  const onElevenLabsMessage = (raw) => {
+    if (elevenUnavailable || terminal) return;
+    let event;
+    try { event = JSON.parse(raw.toString()); } catch { return; }
+    if (event.type === 'conversation_initiation_metadata') {
+      const metadata = event.conversation_initiation_metadata_event || event;
+      const inputFormat = metadata.user_input_audio_format || '';
+      const outputFormat = metadata.agent_output_audio_format || '';
+      elevenInputRate = pcmSampleRate(inputFormat);
+      elevenOutputRate = pcmSampleRate(outputFormat);
+      if (!elevenInputRate || !elevenOutputRate) {
+        diagnostic('elevenlabs_unsupported_audio_format', { callId: payload.callId, inputFormat, outputFormat });
+        void markElevenLabsUnavailable('elevenlabs_unsupported_audio_format');
+        return;
+      }
+      elevenReady = true;
+      clearTimeout(elevenInitTimer);
+      diagnostic('elevenlabs_conversation_initialized', { callId: payload.callId, inputFormat, outputFormat });
+      void finish('connected');
+      for (const chunk of queuedAudio.splice(0)) sendAudioToEleven(chunk, true);
+    }
+    const audio = event.audio_event?.audio_base_64;
+    if (event.type === 'audio' && typeof audio === 'string' && audio.length && exotel.readyState === WebSocket.OPEN && streamSid) {
+      let media;
+      try { media = toExotelMedia(audio, streamSid, elevenOutputRate, exotelRate); }
+      catch (error) {
+        diagnostic('audio_format_error', { callId: payload.callId, direction: 'elevenlabs_to_exotel', error: error.message });
+        void markElevenLabsUnavailable('invalid_elevenlabs_audio', error.message);
+        return;
+      }
+      if (!media) return;
+      const bytes = Buffer.from(audio, 'base64').length;
+      exotel.send(JSON.stringify(media), (error) => {
+        if (error) {
+          diagnostic('audio_forward_error', { callId: payload.callId, direction: 'elevenlabs_to_exotel', error: error.message });
+          void markElevenLabsUnavailable('exotel_audio_send_failed', error.message);
+        }
+      });
+      counts.elevenAudioIn++;
+      counts.elevenAudioInBytes += bytes;
+      counts.exotelMediaOut++;
+      counts.exotelMediaOutBytes += Buffer.from(media.media.payload, 'base64').length;
+      diagnostic('elevenlabs_audio_received_and_forwarded', { callId: payload.callId, packets: counts.elevenAudioIn, inputBytes: bytes, forwardedPackets: counts.exotelMediaOut, forwardedBytes: counts.exotelMediaOutBytes });
+    } else if (event.type === 'interruption' && exotel.readyState === WebSocket.OPEN && streamSid) {
+      exotel.send(JSON.stringify({ event: 'clear', stream_sid: streamSid }));
+    } else if (event.type === 'ping') {
+      setTimeout(() => {
+        if (eleven?.readyState === WebSocket.OPEN) eleven.send(JSON.stringify({ type: 'pong', event_id: event.ping_event?.event_id }));
+      }, Number(event.ping_event?.ping_ms || 0));
+    } else if (event.type === 'error' || event.type === 'client_error') {
+      void markElevenLabsUnavailable('elevenlabs_protocol_error', String(event.message || event.error || 'ElevenLabs reported a conversation error.'));
+    }
+  };
   try {
     diagnostic('exotel_connected', { callId: payload.callId });
-    await finish('ringing');
+    void finish('ringing');
     const connectElevenLabs = async () => {
-      if (eleven) return;
+      if (eleven || elevenUnavailable) return;
+      if (!session.elevenLabsApiKey) {
+        await markElevenLabsUnavailable('elevenlabs_key_missing');
+        return;
+      }
       diagnostic('elevenlabs_session_creation_started', { callId: payload.callId, agentId: payload.agentId, elevenLabsAgentId: payload.elevenLabsAgentId });
       eleven = new WebSocket(await signedConversationUrl(payload.elevenLabsAgentId, session.elevenLabsApiKey));
       elevenInitTimer = setTimeout(() => {
         if (!elevenReady) {
-          void finish('failed', { reason: 'elevenlabs_initialization_timeout' });
-          eleven?.close();
-          exotel.close();
+          void markElevenLabsUnavailable('elevenlabs_initialization_timeout');
         }
       }, 15000);
       eleven.on('open', () => {
-        elevenOpened = true;
         diagnostic('elevenlabs_socket_open', { callId: payload.callId });
         eleven.send(JSON.stringify({
           type: 'conversation_initiation_client_data',
@@ -134,87 +214,16 @@ sockets.on('connection', async (exotel, payload, initialExotelRate) => {
         }));
         void finish('agent-connecting');
       });
-    };
-    eleven.on('message', (raw) => {
-      let event;
-      try { event = JSON.parse(raw.toString()); } catch { return; }
-      if (event.type === 'conversation_initiation_metadata') {
-        const metadata = event.conversation_initiation_metadata_event || event;
-        const inputFormat = metadata.user_input_audio_format || '';
-        const outputFormat = metadata.agent_output_audio_format || '';
-        elevenInputRate = pcmSampleRate(inputFormat);
-        elevenOutputRate = pcmSampleRate(outputFormat);
-        if (!elevenInputRate || !elevenOutputRate) {
-          diagnostic('elevenlabs_unsupported_audio_format', { callId: payload.callId, inputFormat, outputFormat });
-          void finish('failed', { reason: 'elevenlabs_unsupported_audio_format' });
-          eleven.close();
-          exotel.close();
-          return;
-        }
-        elevenReady = true;
-        clearTimeout(elevenInitTimer);
-        diagnostic('elevenlabs_conversation_initialized', { callId: payload.callId, inputFormat, outputFormat });
-        void finish('connected');
-        if (queuedAudio.length) {
-          for (const chunk of queuedAudio.splice(0)) sendAudioToEleven(chunk, true);
-        }
-      }
-      const audio = event.audio_event?.audio_base_64;
-      if (event.type === 'audio' && typeof audio === 'string' && audio.length && exotel.readyState === WebSocket.OPEN && streamSid) {
-        let media;
-        try { media = toExotelMedia(audio, streamSid, elevenOutputRate, exotelRate); }
-        catch (error) {
-          diagnostic('audio_format_error', { callId: payload.callId, direction: 'elevenlabs_to_exotel', error: error.message });
-          void finish('failed', { reason: 'invalid_elevenlabs_audio' });
-          exotel.close();
-          return;
-        }
-        if (!media) return;
-        const bytes = Buffer.from(audio, 'base64').length;
-        exotel.send(JSON.stringify(media), (error) => {
-          if (error) {
-            diagnostic('audio_forward_error', { callId: payload.callId, direction: 'elevenlabs_to_exotel', error: error.message });
-            void finish('failed', { reason: 'exotel_audio_send_failed' });
-          }
-        });
-        counts.elevenAudioIn++;
-        counts.elevenAudioInBytes += bytes;
-        counts.exotelMediaOut++;
-        counts.exotelMediaOutBytes += Buffer.from(media.media.payload, 'base64').length;
-        diagnostic('elevenlabs_audio_received_and_forwarded', { callId: payload.callId, packets: counts.elevenAudioIn, inputBytes: bytes, forwardedPackets: counts.exotelMediaOut, forwardedBytes: counts.exotelMediaOutBytes });
-      } else if (event.type === 'interruption' && exotel.readyState === WebSocket.OPEN) {
-        exotel.send(JSON.stringify({ event: 'clear', stream_sid: streamSid }));
-      } else if (event.type === 'ping') {
-        setTimeout(() => {
-          if (eleven?.readyState === WebSocket.OPEN) eleven.send(JSON.stringify({ type: 'pong', event_id: event.ping_event?.event_id }));
-        }, Number(event.ping_event?.ping_ms || 0));
-      }
-    });
-    eleven.on('error', (error) => {
-      diagnostic('elevenlabs_socket_error', { callId: payload.callId, error: error.message });
-      void finish('failed', { reason: 'elevenlabs_error', error: error.message });
-    });
-    eleven.on('close', (code, reason) => {
-      clearTimeout(elevenInitTimer);
-      diagnostic('elevenlabs_socket_closed', { callId: payload.callId, code, reason: reason.toString() });
-      if (!terminal) void finish('failed', { reason: 'elevenlabs_socket_closed' });
-      if (exotel.readyState === WebSocket.OPEN) exotel.close();
-    });
-    const sendAudioToEleven = (audioBase64, alreadyTranslated = false) => {
-      if (!elevenReady || eleven?.readyState !== WebSocket.OPEN) return false;
-      const pcm = Buffer.from(audioBase64, 'base64');
-      if (!pcm.length) return false;
-      const translated = alreadyTranslated ? audioBase64 : resamplePcm16(pcm, exotelRate, elevenInputRate).toString('base64');
-      eleven.send(JSON.stringify({ user_audio_chunk: translated }), (error) => {
-        if (error) {
-          diagnostic('audio_forward_error', { callId: payload.callId, direction: 'exotel_to_elevenlabs', error: error.message });
-          void finish('failed', { reason: 'elevenlabs_audio_send_failed' });
-        }
+      eleven.on('message', onElevenLabsMessage);
+      eleven.on('error', (error) => {
+        diagnostic('elevenlabs_socket_error', { callId: payload.callId, error: error.message });
+        void markElevenLabsUnavailable('elevenlabs_error', error.message);
       });
-      counts.exotelMediaOut++;
-      counts.exotelMediaOutBytes += Buffer.from(translated, 'base64').length;
-      diagnostic('audio_forwarded_to_elevenlabs', { callId: payload.callId, packets: counts.exotelMediaOut, bytes: counts.exotelMediaOutBytes });
-      return true;
+      eleven.on('close', (code, reason) => {
+        clearTimeout(elevenInitTimer);
+        diagnostic('elevenlabs_socket_closed', { callId: payload.callId, code, reason: reason.toString() });
+        if (!terminal) void markElevenLabsUnavailable('elevenlabs_socket_closed');
+      });
     };
     exotel.on('message', (raw) => {
       let event;
@@ -226,10 +235,7 @@ sockets.on('connection', async (exotel, payload, initialExotelRate) => {
         if ([8000, 16000, 24000].includes(advertisedRate)) exotelRate = advertisedRate;
         diagnostic('exotel_start_received', { callId: payload.callId, streamSid, exotelCallSid: event.start?.call_sid, sampleRate: exotelRate, encoding: event.start?.media_format?.encoding, bitRate: event.start?.media_format?.bit_rate });
         void finish('in-progress', { callSid: event.start?.call_sid, streamSid });
-        void connectElevenLabs().catch((error) => {
-          void finish('failed', { reason: 'elevenlabs_session_creation_failed', error: error instanceof Error ? error.message : 'Session creation failed.' });
-          exotel.close();
-        });
+        void connectElevenLabs().catch((error) => markElevenLabsUnavailable('elevenlabs_session_creation_failed', error instanceof Error ? error.message : 'Session creation failed.'));
       }
       if (event.event === 'media') {
         let rawPcm;
@@ -239,8 +245,7 @@ sockets.on('connection', async (exotel, payload, initialExotelRate) => {
         }
         catch (error) {
           diagnostic('audio_format_error', { callId: payload.callId, direction: 'exotel_to_elevenlabs', error: error.message });
-          void finish('failed', { reason: 'invalid_exotel_audio' });
-          exotel.close();
+          void markElevenLabsUnavailable('invalid_exotel_audio', error.message);
           return;
         }
         if (!rawPcm.length) return;
@@ -250,9 +255,9 @@ sockets.on('connection', async (exotel, payload, initialExotelRate) => {
         diagnostic('exotel_media_received', { callId: payload.callId, packets: counts.exotelMediaIn, bytes, totalBytes: counts.exotelMediaInBytes });
         if (elevenReady) {
           sendAudioToEleven(rawPcm.toString('base64'));
-        } else if (queuedAudio.length < 50) {
+        } else if (!elevenUnavailable && session.elevenLabsApiKey && queuedAudio.length < 50) {
           queuedAudio.push(rawPcm.toString('base64'));
-        } else {
+        } else if (queuedAudio.length >= 50) {
           diagnostic('audio_queue_overflow', { callId: payload.callId, queuedPackets: queuedAudio.length });
         }
       }

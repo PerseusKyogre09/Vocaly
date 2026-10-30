@@ -108,7 +108,7 @@ async function provisionBridgeSession(publicBridgeUrl: string, internalBridgeUrl
       agentId: selectedAgent.id,
       elevenLabsAgentId: selectedAgent.elevenLabsAgentId,
       firstMessage: selectedAgent.firstMessage,
-      elevenLabsApiKey: apiKey
+      ...(apiKey ? { elevenLabsApiKey: apiKey } : {})
     })
   });
   const responseText = await response.text();
@@ -153,7 +153,7 @@ export const POST: APIRoute = async ({ request }) => {
   const agentId = body && typeof body === 'object' && typeof body.agentId === 'string' ? body.agentId : '';
   const elevenLabsApiKey = body && typeof body === 'object' && typeof body.elevenLabsApiKey === 'string' ? body.elevenLabsApiKey.trim() : '';
   try {
-    if (elevenLabsApiKey.length < 10) return Response.json({ error: 'Connect your ElevenLabs account before placing a phone call.' }, { status: 400 });
+    if (elevenLabsApiKey && elevenLabsApiKey.length < 10) return Response.json({ error: 'The ElevenLabs API key is invalid. Reconnect it or place the call without agent audio.' }, { status: 400 });
     const destination = normalizePhoneNumber(body && typeof body === 'object' ? body.destination : '');
     const [selectedAgent] = await getDatabase().select().from(agent)
       .where(and(eq(agent.id, agentId), eq(agent.userId, session.user.id))).limit(1);
