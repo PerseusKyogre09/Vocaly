@@ -67,7 +67,7 @@ const server = createServer(async (request, response) => {
     return;
   }
   response.writeHead(200, { 'content-type': 'text/plain' });
-  response.end('VoxFlow phone bridge is running.');
+  response.end('Vocaly phone bridge is running.');
 });
 const sockets = new WebSocketServer({ noServer: true, clientTracking: false });
 
@@ -278,4 +278,4 @@ sockets.on('connection', async (exotel, payload, initialExotelRate) => {
   }
 });
 
-server.listen(port, () => console.log(`VoxFlow phone bridge listening on ${port}`));
+server.listen(port, () => console.log(`Vocaly phone bridge listening on ${port}`));

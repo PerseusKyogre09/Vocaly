@@ -7,7 +7,7 @@
   let menuOpen = false;
 
   const stages = [
-    { number: '01', label: 'DESCRIBE', title: 'Start with the conversation', copy: 'Tell VoxFlow what your assistant should do in plain language.' },
+    { number: '01', label: 'DESCRIBE', title: 'Start with the conversation', copy: 'Tell Vocaly what your assistant should do in plain language.' },
     { number: '02', label: 'GENERATE', title: 'Give it a point of view', copy: 'AI creates the personality, instructions and guardrails.' },
     { number: '03', label: 'TEST', title: 'Pressure-test the edge cases', copy: 'Talk to it and run realistic caller scenarios before launch.' },
     { number: '04', label: 'DEPLOY', title: 'Put it on the line', copy: 'Connect a voice, create the agent and start taking calls.' }
@@ -23,13 +23,13 @@
 </script>
 
 <svelte:head>
-  <title>VoxFlow — Your next employee should have a voice.</title>
+  <title>Vocaly — Your next employee should have a voice.</title>
   <meta name="description" content="Build, test and deploy AI voice agents without writing code." />
 </svelte:head>
 
 <div class="landing">
   <header class="site-nav">
-    <a class="wordmark" href="#top" aria-label="VoxFlow home"><span class="mark"><i></i><i></i><i></i></span><span>vox<span class="violet">flow</span></span></a>
+    <a class="wordmark" href="#top" aria-label="Vocaly home"><span class="mark"><i></i><i></i><i></i></span><span>Vocaly</span></a>
     <button class="menu-toggle" aria-label="Toggle navigation" onclick={() => menuOpen = !menuOpen}>{#if menuOpen}<X size={18}/>{:else}<span></span><span></span>{/if}</button>
     <nav class:open={menuOpen}>
       <a href="#product" onclick={() => menuOpen = false}>Product</a>
@@ -45,7 +45,7 @@
       <div class="hero-copy">
         <div class="eyebrow"><span class="rule"></span> NO-CODE VOICE INTELLIGENCE <span class="mono">/ 01</span></div>
         <h1>Your next<br/>employee<br/><em>should have<br/>a voice.</em></h1>
-        <p>Describe the conversation. Build the intelligence. Give it a voice. VoxFlow turns your ideas into working AI voice agents — without writing a single line of code.</p>
+        <p>Describe the conversation. Build the intelligence. Give it a voice. Vocaly turns your ideas into working AI voice agents — without writing a single line of code.</p>
         <div class="hero-actions"><a class="button primary" href="/app">Build your first agent <ArrowRight size={16}/></a><a class="text-link" href="#product">Explore how it works <ArrowDownRight size={16}/></a></div>
       </div>
       <div class="instrument" aria-label="Interactive voice visualization">
@@ -61,7 +61,7 @@
       <div class="hero-note mono">DESCRIBE <b>→</b> GENERATE <b>→</b> TEST <b>→</b> DEPLOY</div>
     </section>
 
-    <section class="ticker" aria-label="VoxFlow capabilities"><div>VOICE-FIRST BY DESIGN</div><div>NO CODE / ALL CONTROL</div><div>BUILT FOR THE EDGE CASES</div><div>POWERED BY ELEVENLABS</div></section>
+    <section class="ticker" aria-label="Vocaly capabilities"><div>VOICE-FIRST BY DESIGN</div><div>NO CODE / ALL CONTROL</div><div>BUILT FOR THE EDGE CASES</div><div>POWERED BY ELEVENLABS</div></section>
 
     <section id="product" class="demo shell">
       <div class="section-intro"><div class="eyebrow"><span class="rule"></span> THE PRODUCT <span class="mono">/ 02</span></div><h2>From an idea<br/>to a <em>conversation.</em></h2><p>One brief becomes a working voice agent. See the building blocks before you connect a single account.</p></div>
@@ -71,18 +71,18 @@
       </div>
     </section>
 
-    <section id="workflow" class="workflow shell"><div class="section-intro split"><div><div class="eyebrow"><span class="rule"></span> THE WORKFLOW <span class="mono">/ 03</span></div><h2>Every conversation<br/>has a <em>structure.</em></h2></div><p>Now you can see it. Arrange the steps, make the actions explicit and give your agent a reliable path through the call.</p></div><div class="flow-rail">{#each nodes as node, i}<button class:active={i === activeStage + 1 || i === 0} onclick={() => activeStage = (i + 2) % 3}><span class="node-index">0{i + 1}</span><strong>{node}</strong><span class="node-kind">{i === 0 ? 'TRIGGER' : i === 4 ? 'ACTION' : i === 5 ? 'RESPONSE' : 'STEP'}</span>{#if i < nodes.length - 1}<span class="connector"></span>{/if}</button>{/each}</div><div class="flow-caption"><Workflow size={16}/><span>THE SAME BUILDING BLOCKS INSIDE VOXFLOW</span><span class="mono">SELECT A NODE TO INSPECT</span></div></section>
+    <section id="workflow" class="workflow shell"><div class="section-intro split"><div><div class="eyebrow"><span class="rule"></span> THE WORKFLOW <span class="mono">/ 03</span></div><h2>Every conversation<br/>has a <em>structure.</em></h2></div><p>Now you can see it. Arrange the steps, make the actions explicit and give your agent a reliable path through the call.</p></div><div class="flow-rail">{#each nodes as node, i}<button class:active={i === activeStage + 1 || i === 0} onclick={() => activeStage = (i + 2) % 3}><span class="node-index">0{i + 1}</span><strong>{node}</strong><span class="node-kind">{i === 0 ? 'TRIGGER' : i === 4 ? 'ACTION' : i === 5 ? 'RESPONSE' : 'STEP'}</span>{#if i < nodes.length - 1}<span class="connector"></span>{/if}</button>{/each}</div><div class="flow-caption"><Workflow size={16}/><span>THE SAME BUILDING BLOCKS INSIDE VOCALY</span><span class="mono">SELECT A NODE TO INSPECT</span></div></section>
 
     <section id="reality-lab" class="lab"><div class="shell"><div class="section-intro split"><div><div class="eyebrow"><span class="rule"></span> REALITY LAB <span class="mono">/ 04</span></div><h2>Don't hope your<br/>agent works.<br/><em>Find out.</em></h2></div><p>Run your agent through realistic caller scenarios before it ever reaches a live line. Find the weak spots. Fix the prompt. Run it again.</p></div><div class="lab-board"><div class="scenario-list"><div class="panel-label">SCENARIOS / 06</div>{#each scenarios as scenario, i}<button class:chosen={activeScenario === i} onclick={() => activeScenario = i}><span class="scenario-dot"></span><span>{scenario.label}</span><span class="scenario-status">{scenario.status}</span></button>{/each}<div class="run-label"><span class="pulse"></span> SIMULATION COMPLETE</div></div><div class="lab-result"><div class="result-top"><span>RESULT / {scenarios[activeScenario].label}</span><span class="mono">ILLUSTRATIVE DATA</span></div><div class="score"><strong>{scenarios[activeScenario].score}</strong><span>/100<br/>RELIABILITY</span></div><div class="result-bar"><i style={`width:${scenarios[activeScenario].score}%`}></i></div><div class="finding"><span class="status-chip">{scenarios[activeScenario].status}</span><p>{scenarios[activeScenario].note}</p></div><div class="repair"><Sparkles size={15}/><div><b>SUGGESTED PROMPT REPAIR</b><p>Add a concise boundary for off-topic questions and offer human handoff when confidence is low.</p></div><ArrowRight size={15}/></div></div></div></div></section>
 
-    <section id="elevenlabs" class="integration shell"><div class="integration-mark"><AudioLines size={34}/></div><div><div class="eyebrow"><span class="rule"></span> VOICE, WITHOUT THE FRICTION <span class="mono">/ 05</span></div><h2>Powered by ElevenLabs.<br/><em>Built around your ideas.</em></h2><p>VoxFlow uses ElevenLabs for natural conversational voice agents — with voice selection, knowledge bases, agent tools and browser-based testing in one focused workspace.</p><a class="text-link" href="/app">Connect your voice engine <ArrowRight size={16}/></a></div><div class="integration-notes"><span><b>01</b> NATURAL CONVERSATIONS</span><span><b>02</b> VOICE SELECTION</span><span><b>03</b> AGENT TOOLS</span><span><b>04</b> BROWSER TESTING</span></div></section>
+    <section id="elevenlabs" class="integration shell"><div class="integration-mark"><AudioLines size={34}/></div><div><div class="eyebrow"><span class="rule"></span> VOICE, WITHOUT THE FRICTION <span class="mono">/ 05</span></div><h2>Powered by ElevenLabs.<br/><em>Built around your ideas.</em></h2><p>Vocaly uses ElevenLabs for natural conversational voice agents — with voice selection, knowledge bases, agent tools and browser-based testing in one focused workspace.</p><a class="text-link" href="/app">Connect your voice engine <ArrowRight size={16}/></a></div><div class="integration-notes"><span><b>01</b> NATURAL CONVERSATIONS</span><span><b>02</b> VOICE SELECTION</span><span><b>03</b> AGENT TOOLS</span><span><b>04</b> BROWSER TESTING</span></div></section>
 
     <section id="how-it-works" class="stages shell"><div class="section-intro"><div class="eyebrow"><span class="rule"></span> HOW IT WORKS <span class="mono">/ 06</span></div><h2>Four moves from<br/><em>blank page</em> to live voice.</h2></div><div class="stage-grid">{#each stages as stage, i}<button class:current={activeStage === i} onclick={() => activeStage = i}><span class="stage-number">{stage.number}</span><span class="stage-label">{stage.label}</span><h3>{stage.title}</h3><p>{stage.copy}</p><ChevronRight size={16}/></button>{/each}</div></section>
 
     <section id="documentation" class="final-cta shell"><div class="eyebrow"><span class="rule"></span> READY WHEN YOU ARE <span class="mono">/ 07</span></div><h2>Someone is waiting<br/>on the <em>other end.</em></h2><p>Build the voice agent that should have been there all along.</p><a class="button primary" href="/app">Create your first agent <ArrowRight size={16}/></a></section>
   </main>
 
-  <footer class="footer shell"><a class="wordmark" href="#top"><span class="mark"><i></i><i></i><i></i></span><span>vox<span class="violet">flow</span></span></a><div class="footer-links"><a href="#product">Product</a><a href="#documentation">Documentation</a><a href="#elevenlabs">ElevenLabs integration</a><a href="https://github.com" target="_blank" rel="noreferrer">GitHub <ExternalLink size={12}/></a></div><div class="footer-meta"><span>TEAM ZENITHCODE</span><span>PRIVACY / TERMS</span><span class="mono">© 2026</span></div></footer>
+  <footer class="footer shell"><a class="wordmark" href="#top"><span class="mark"><i></i><i></i><i></i></span><span>Vocaly</span></a><div class="footer-links"><a href="#product">Product</a><a href="#documentation">Documentation</a><a href="#elevenlabs">ElevenLabs integration</a><a href="https://github.com" target="_blank" rel="noreferrer">GitHub <ExternalLink size={12}/></a></div><div class="footer-meta"><span>TEAM ZENITHCODE</span><span>PRIVACY / TERMS</span><span class="mono">© 2026</span></div></footer>
 </div>
 
 <style>

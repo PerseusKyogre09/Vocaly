@@ -50,9 +50,9 @@
   }
 </script>
 
-<svelte:head><title>VoxFlow — Sign in</title></svelte:head>
+<svelte:head><title>Vocaly — Sign in</title></svelte:head>
 <main class="auth-shell">
-  <a class="brand" href="/"><span class="mark"><i></i><i></i><i></i></span>vox<span>flow</span></a>
+  <a class="brand" href="/"><span class="mark"><i></i><i></i><i></i></span>Vocaly</a>
   <section class="auth-card">
     <div class="eyebrow"><ShieldCheck size={14}/> PRIVATE WORKSPACE</div>
     <h1>{mode === 'sign-in' ? 'Welcome back.' : 'Create your workspace.'}</h1>

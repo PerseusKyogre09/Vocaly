@@ -145,7 +145,7 @@ export function compileWorkflow(workflow) {
   const byId = new Map(nodes.map(n => [n.id,n]));
   const outgoing = id => edges.filter(e => e.source === id);
   const visited = new Set();
-  const lines = ['CONVERSATION WORKFLOW (compiled from the saved VoxFlow graph):'];
+  const lines = ['CONVERSATION WORKFLOW (compiled from the saved Vocaly graph):'];
   const walk = (id, depth=0) => {
     if (visited.has(id)) return;
     visited.add(id);

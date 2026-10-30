@@ -1,8 +1,8 @@
-# VoxFlow
+# Vocaly
 
 **Describe it. Build it. Talk to it. Ship it.**
 
-VoxFlow is a hackathon MVP for building, configuring, testing and deploying conversational voice agents. It uses Astro + Svelte 5, Groq for structured agent generation and Reality Lab evaluation, and ElevenLabs Agents for the actual voice agent and browser conversation.
+Vocaly is a hackathon MVP for building, configuring, testing and deploying conversational voice agents. It uses Astro + Svelte 5, Groq for structured agent generation and Reality Lab evaluation, and ElevenLabs Agents for the actual voice agent and browser conversation.
 
 ## What's included
 
@@ -81,8 +81,8 @@ GitHub and Google buttons remain unavailable unless the corresponding client ID 
 
 ## Security model and limitations
 
-- The browser vault uses IndexedDB and AES-GCM encryption. Its non-extractable CryptoKey is also held in IndexedDB. This is useful protection for stored credentials at rest, but it is **not a defence against same-origin XSS, malicious browser extensions, or a compromised device**. A script executing on the VoxFlow origin can potentially ask the browser to decrypt and use the key.
-- When an API operation is requested, the key is sent over HTTPS in the POST body to a VoxFlow serverless endpoint, which forwards it to ElevenLabs. The endpoint does not intentionally persist or log it. The server necessarily handles the plaintext key in memory during that request.
+- The browser vault uses IndexedDB and AES-GCM encryption. Its non-extractable CryptoKey is also held in IndexedDB. This is useful protection for stored credentials at rest, but it is **not a defence against same-origin XSS, malicious browser extensions, or a compromised device**. A script executing on the Vocaly origin can potentially ask the browser to decrypt and use the key.
+- When an API operation is requested, the key is sent over HTTPS in the POST body to a Vocaly serverless endpoint, which forwards it to ElevenLabs. The endpoint does not intentionally persist or log it. The server necessarily handles the plaintext key in memory during that request.
 - Use a dedicated, least-privilege ElevenLabs API key; rotate it if exposed. Disconnect removes the encrypted key from this browser.
 - A localStorage draft remains as a local fallback, while authenticated agent, workflow and Reality Lab state is synchronized to the user's Neon workspace.
 - Groq is a platform-side service and its key must be configured by the deployer. Never commit `.env`.
@@ -126,7 +126,7 @@ src/
 
 ## Team
 
-Team ZenithCode · VoxFlow
+Team ZenithCode · Vocaly
 ## Outbound phone calling (Exotel + ElevenLabs)
 
 Outbound calling uses the standalone `phone-bridge/` Node service because Vercel/Astro serverless
@@ -142,7 +142,7 @@ long-running container/VM. It must have a public `wss://` URL. Configure:
 
 ```env
 PORT=8080
-VOXFLOW_APP_URL=https://your-voxflow-app.example
+VOXFLOW_APP_URL=https://your-vocaly-app.example
 PHONE_BRIDGE_SECRET=<same random secret configured in the web app>
 ELEVENLABS_AUDIO_SAMPLE_RATE=16000
 ```
@@ -153,7 +153,7 @@ an ExoPhone that Exotel has enabled for outbound Connect Voice AI calls; a trial
 assumed to be eligible.
 
 The bridge exposes `/` as a health check, `/sessions` for authenticated internal provisioning,
-and `/ws` for Exotel. The authenticated VoxFlow server provisions each user's existing
+and `/ws` for Exotel. The authenticated Vocaly server provisions each user's existing
 ElevenLabs key into bridge memory for one short-lived call session. The key is never placed in
 the Exotel URL, logs, or `phoneCall` records, and is discarded when the session is consumed or
 expires. Never expose the bridge secret or user key to the browser beyond the existing
@@ -181,5 +181,5 @@ Exotel, so localhost requires a secure tunnel or deployed web app URL.
 3. Use the ExoPhone provisioned for outbound calling as `EXOTEL_CALLER_ID`.
 4. Configure the web app's `PHONE_BRIDGE_PUBLIC_URL` as the bridge's `wss://` URL.
 5. Test the ExoPhone with one call. Trial account restrictions, destination verification, caller-ID
-   approval, and insufficient credits are provider-side checks; VoxFlow surfaces Exotel's returned
+   approval, and insufficient credits are provider-side checks; Vocaly surfaces Exotel's returned
    error and does not substitute a different number.
