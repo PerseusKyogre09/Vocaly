@@ -43,6 +43,13 @@
       "when": 1793355588493,
       "tag": "0005_organic_puppet_master",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1793357396489,
+      "tag": "0006_large_sentinels",
+      "breakpoints": true
     }
   ]
 }
